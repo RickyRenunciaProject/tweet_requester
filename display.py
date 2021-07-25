@@ -7,8 +7,8 @@ from google.cloud.translate_v3.types.translation_service import TranslateTextRes
 from proto.fields import RepeatedField
 from tweet_rehydrate.analysis import TweetJLAnalyzer, TweetAnalyzer, \
     getsizeof, TweetMedia, TweetPhoto, TweetVideo, json
-from tweet_rehydrate.cache import SimpleCache
-from tweet_rehydrate.session import TSess
+from cache import SimpleCache
+from session import TSess
 import ipywidgets as widgets
 from IPython.core.display import display, HTML, clear_output, display_html, \
     display_javascript, update_display, Javascript

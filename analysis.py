@@ -3,9 +3,8 @@ import pickle
 import os.path
 from sys import getsizeof
 from typing import OrderedDict, Union, List, Tuple
-from tweet_rehydrate.cache import JsonlHandler
+from cache import JsonlHandler
 import pandas as pd
-import sqlite3
 
 
 class TweetMedia:

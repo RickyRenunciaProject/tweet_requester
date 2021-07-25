@@ -2,7 +2,7 @@ import json
 from time import sleep
 import requests
 from os.path import isfile
-from tweet_rehydrate.cache import Cache, md5, sha1, HashType, Request
+from cache import Cache, md5, sha1, HashType, Request
 from typing import Union, Tuple, List
 from icecream import ic
 
