@@ -257,16 +257,20 @@ class JsonLInteractiveClassifier:
 
             for media in tweet.localMedia:
                 cur.execute(
-                    f"""INSERT INTO tweet_media
+                    f"""INSERT INTO media
                     (
-                        "tweet_id",
-                        "has_media",
-                        "language"
+                        "media_id",
+                        "media_url",
+                        "type",
                     )
                     VALUES (?, ?, ?);""",
-                    (tweet.id, tweet.hasMedia, language)
+                    (
+                        media.id,
+                        media.url(),
+                        media.mtype()
+                    )
                 )
-            self.commit()
+                self.commit()
                 
 
     def initialize(self, tweet_ids_file: str):
