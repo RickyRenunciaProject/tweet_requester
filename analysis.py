@@ -3,7 +3,7 @@ import pickle
 import os.path
 from sys import getsizeof
 from typing import OrderedDict, Union, List, Tuple
-from cache import JsonlHandler
+from tweet_rehydrate.cache import JsonlHandler
 import pandas as pd
 
 
@@ -129,6 +129,14 @@ class TweetAnalyzer:
         if not self.onlyLocalMedia:
             self._hasMedia()
         self._hasLocalMedia()
+
+    def isBasedOn(self) -> str:
+        isBasedOn=""
+        if self.isRetweet:
+            isBasedOn = self.retweeted_status.id
+        elif self.isQuote:
+            isBasedOn = self.quoted_status.id
+        return isBasedOn
 
     def language(self) -> Union[str, None]:
         # Use default "und" used by Twitter
