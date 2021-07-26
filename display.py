@@ -295,7 +295,7 @@ class JsonLInteractiveClassifier:
         """)
         self.commit()
 
-        cur.execute('''CREATE TABLE user (
+        cur.execute('''CREATE TABLE tweet_user (
             user_id TEXT,
             user_url TEXT,
             screen_name TEXT,
@@ -308,11 +308,11 @@ class JsonLInteractiveClassifier:
             PRIMARY KEY("tweet_id", "media_id"));''')
         self.commit()
 
-        cur.execute('''CREATE TABLE media (
+        cur.execute('''CREATE TABLE tweet_media (
             media_id TEXT,
             media_url TEXT,
             type TEXT,
-            PRIMARY KEY("media_id"));''')
+            PRIMARY KEY("media_id", "media_url"));''')
         self.commit()
 
         # Traduction Cache in DB
@@ -800,11 +800,12 @@ class JsonLInteractiveClassifier:
             )
         )
         self.commit()
-
+        media_duplicates = 0
+        media_duplicates_errors = []
         for media in tweet.localMedia:
             try:
                 cur.execute(
-                    f"""INSERT INTO tweet_media
+                    """INSERT INTO tweet_media
                     (
                         "media_id",
                         "media_url",
@@ -818,13 +819,38 @@ class JsonLInteractiveClassifier:
                     )
                 )
                 self.commit()
+
+                cur.execute(
+                    """INSERT OR REPLACE INTO tweet_match_media
+                    (
+                        "tweet_id",
+                        "media_id"
+                    )
+                    VALUES (?, ?);""",
+                    (
+                        tweet.id,
+                        media.id
+                    )
+                )
+                self.commit()
+            except sqlite3.IntegrityError as err:
+                if "unique" in str(err).lower():
+                    media_duplicates += 1
+                    media_duplicates_errors.append(err)
+                    # logging.info(f"Duplicate Media Entity: {err}")
+                else:
+                    logging.error(err)
+                    raise
             except Exception as err:
+                logging.error(f"{media.id} - {media.mtype()} - {media.url()}")
                 logging.error(err)
                 selection = input("Continue?\n\tY/N: ")
                 if selection.lower()[0] == "y":
                     continue
                 else:
                     raise
+        if media_duplicates > 0:
+            logging.info(f"Found {media_duplicates} duplicates.\nLast Error: {media_duplicates_errors[-1]}")
         cur.close()
 
     def display_tweet(self, tweet_id, target_language_code: str = ""):
@@ -940,8 +966,25 @@ class JsonLInteractiveClassifier:
                 self.skip_current()
                 break
 
-    def preprocessN(self, n=20):
-        pass
+    def preprocess_batch(self, n:int=20):
+        stages=[
+            PROCESSING_STAGES.UNPROCESSED
+        ]
+        preload_n: int = int(n/2.0)
+        self.load_random_tweets(
+            n= preload_n,
+            stages=stages
+        )
+        count=0
+        while count < n:
+            tweet=self.load_next_tweet(stages=stages)
+            self.save_auto_details(tweet)
+            self.tweet_set_state(
+                tweet.id, 
+                PROCESSING_STAGES.PREPROCESSED
+            )
+            count+=1
+
 
     def finalize_current(self, *args, **kwargs):
         c_time = time()
