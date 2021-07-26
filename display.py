@@ -970,13 +970,13 @@ class JsonLInteractiveClassifier:
         stages=[
             PROCESSING_STAGES.UNPROCESSED
         ]
-        preload_n: int = int(n/2.0)
+        preload_n: int = int(n * 0.75)
         self.load_random_tweets(
             n= preload_n,
             stages=stages
         )
         count=0
-        while count < n:
+        while count < n or not self._next_tweet_id.empty():
             tweet=self.load_next_tweet(stages=stages)
             self.save_auto_details(tweet)
             self.tweet_set_state(
