@@ -1,4 +1,4 @@
-import os
+import os, logging
 import os.path
 import datetime
 from typing import TypedDict, TypeVar, Dict
@@ -232,10 +232,10 @@ class Cache():
         data = zlib.compress(value, level=self.COMPRESS_LEVEL)
         with open(self.request_filename(tweet_request), "wb") as cache:
             cache.write(data)
-        # print(f"Stored at: {self.request_filename(tweet_request)}")
+        logging.debug(f"Stored at: {self.request_filename(tweet_request)}")
 
     def store(self, uri: str,  value: str, method: str = "GET", params: dict = {}, headers: dict = {}):
-        # print("storing")
+        logging.debug("Storing...")
         self.store_bytes(uri, value.encode("utf-8"), method, params, headers)
 
 
@@ -276,8 +276,8 @@ class SimpleCache:
                         self, key), f"Object has no attribute named {key} or {key.lower()}."
                     self.__dict__.update({key: value})
                 except Exception as e:
-                    print("During Cache Initialization: ")
-                    print(e)
+                    logging.error("During Cache Initialization: ")
+                    logging.error(e)
                     raise
 
     def __del__(self):
@@ -360,31 +360,3 @@ class JsonlHandler(SimpleCache):
             self.CACHE.update({key: store})
         return value
 
-
-# class TweetCache(Cache):
-#     def __init__(
-#             self, cache_dir="./.one_tweet_cache/", hash_function=None,
-#             soft_reload=False, refresh_rate=Cache.TWO_YEARS_IN_DAYS,
-#             compression_level:int=3, hash_split=True
-#             ):
-#         assert type(hash_function) is HashType, f"hash_function must be of type '{type(HashType.md5)}''"
-#         self.keys={}
-#         self.HASH_SPLIT = hash_split
-#         self.hash: HashType = hash_function
-#         self.SOFT_RELOAD: bool = soft_reload
-#         self.REFRESH_RATE: float = refresh_rate * 24 * 60 * 60 # Change from years to seconds
-#         try:
-#             assert  0 <= compression_level <= 9, f"Compression level {compression_level} invalid! Defaulting to CmpLvl=3."
-#         except:
-#             compression_level = 0
-#         finally:
-#             self.COMPRESS_LEVEL = compression_level
-#         if not os.path.isdir(cache_dir):
-#             assert not os.path.isfile(cache_dir), f"'{cache_dir}' is a file not a directory!"
-#             os.makedirs(cache_dir)
-#         for file_name in os.listdir(cache_dir):
-#             full_path=os.path.join(cache_dir, file_name)
-#             if os.path.isfile(full_path):
-#                 self.keys.update({file_name: os.path.getmtime(full_path)})
-#         print(str(self.keys))
-#         self.CACHE_DIR = cache_dir

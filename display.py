@@ -12,18 +12,16 @@ import sqlite3
 from os.path import isfile
 from shutil import move
 from time import time
-from icecream import ic
 from enum import Enum
 from queue import Queue
 from google.cloud import translate
 from google.oauth2 import service_account
-
+import logging
 
 """
 This module objective is to generate an interactive store for
 interacting with twitter records inside a jupyter notebook.
 """
-# ic.disable()
 
 
 def prepare_google_credentials(credentials_file="")\
@@ -94,15 +92,12 @@ class TweetInteractiveClassifier(TweetAnalyzer):
 
 class JsonLInteractiveClassifier:
     _delay = 5.0
+    _MAX_RETRIES = 30
 
     def __init__(
         self, tweet_ids_file: str, session: TSess,
         pre_initialized=False, sqlite_db: str = "", **kwargs
     ):
-        # Mute icecream output of asking for mute
-        if kwargs.get("mute", False):
-            ic.disable()
-
         self.google_credentials: service_account.Credentials = \
             kwargs.get("google_credentials", None)
         self.target_language_code = kwargs.get("target_language_code", "en")
@@ -137,8 +132,6 @@ class JsonLInteractiveClassifier:
         self.embeding = widgets.HTML()
         self.javascript = Javascript(
             url="https://platform.twitter.com/widgets.js")
-        # display_id = display(self.button_reject, self.button_skip, self.embeding, display_id=True)
-        # self.load_random_tweet()
         if kwargs.get("start_inmediately", False):
             self.StartEvaluations()
 
@@ -414,8 +407,10 @@ class JsonLInteractiveClassifier:
             try:
                 self.db.close()
             except Exception as error:
-                ic(error)
-                ic("Could not close connections.")
+                # If not None it should be connected
+                # Still ignore and try to connect
+                logging.warning(error)
+                logging.warning("Could not close connection, keep going.")
             self.db = None
 
     def cursor(self, *args, **kwargs):
@@ -443,7 +438,7 @@ class JsonLInteractiveClassifier:
             if state == 0:
                 self._next_tweet_id.put(tweet_id)
             else:
-                ic("Already Processed", tweet_id)
+                logging.debug(f"Already Processed: {tweet_id}")
         else:
             # If not in table add to table and queue
             cur.execute(
@@ -478,7 +473,7 @@ class JsonLInteractiveClassifier:
         cur.close()
         self.close()
         if load_next:
-            ic("Skipping Retweet!")
+            logging.debug("Skipping Retweet!")
             self.load_next_tweet()
 
     def StartEvaluations(
@@ -521,6 +516,7 @@ class JsonLInteractiveClassifier:
                 # Return no current tweet as no more can be found.
                 self.current_tweet_id = None
                 self.current_tweet = None
+                logging.info("No more tweets to process.")
                 return
 
         # Get next tweet_id from Queue and clear current_tweet object
@@ -538,8 +534,14 @@ class JsonLInteractiveClassifier:
         try:
             state = rows[0][0]
         except:
-            ic("Tweet not in table!!!", self.current_tweet_id)
-            raise
+            logging.warning(
+                f"Tweet{self.current_tweet_id} not in table!!! Trying to add.")
+            try:
+                self.add_to_queue(self.current_tweet_id)
+                state = PROCESSING_STAGES.UNPROCESSED.value
+            except Exception as err:
+                logging.error(err)
+                raise
 
         if PROCESSING_STAGES(state) == PROCESSING_STAGES.UNPROCESSED:
             # Update or insert with state Reviewing.
@@ -565,7 +567,7 @@ class JsonLInteractiveClassifier:
             cur.close()
             self.close()
             # Try again
-            ic(f"Tweet state: {state}. Loading Next Tweet.")
+            logging.info(f"Tweet state: {state}. Loading Next Tweet.")
             self.load_next_tweet()
 
         return self.current_tweet
@@ -611,7 +613,7 @@ class JsonLInteractiveClassifier:
             self.close()
         except:
             self.current_tweet_id = None
-            ic(self.current_tweet_id)
+            logging.debug(f"Set self.current_tweet_id='{self.current_tweet_id}'")
         if self.current_tweet_id is not None:
             try:
                 self.current_tweet = TweetInteractiveClassifier(
@@ -742,8 +744,11 @@ class JsonLInteractiveClassifier:
                 '%a %b %d %H:%M:%S +0000 %Y'
             )
             datePublished = datePublished.timestamp()
-        except:
-            ic("Could not generate datePublished", tweet.data.get("created_at"))
+        except Exception as err:
+            logging.error(
+                f"Could not generate datePublished: {tweet.data.get('created_at','MISSING')}"
+            )
+            logging.error(err)
             raise
 
         cur.execute(
@@ -814,7 +819,7 @@ class JsonLInteractiveClassifier:
                 )
                 self.commit()
             except Exception as err:
-                print(err)
+                logging.error(err)
                 selection = input("Continue?\n\tY/N: ")
                 if selection.lower()[0] == "y":
                     continue
@@ -829,7 +834,7 @@ class JsonLInteractiveClassifier:
                 session=self.tweet_session
             )
         except Exception as err:
-            print(err)
+            logging.error(err)
             return
 
         html_content = tweet.oEmbeded()
@@ -900,18 +905,17 @@ class JsonLInteractiveClassifier:
             clear_output()
             # self.previous_tweet = self.current_tweet
             # self.current_tweet: TweetAnalyzer = None
-            print("Loading Tweet...")
+            logging.info("Loading Tweet...")
             retry_count: int = 0
             self.current_tweet = None
             while self.current_tweet is None:
                 retry_count += 1
-                if retry_count > 15:
-                    ic(retry_count, "Too many missing")
+                if retry_count > self._MAX_RETRIES:
+                    logging.info(retry_count, "Too many missing")
                     break
                 self.current_tweet = self.load_next_tweet(stages=stages)
-            if not ic(self.current_tweet):
-                ic("No tweet loaded", self.current_tweet)
-
+            if not self.current_tweet:
+                logging.info(f"No tweet loaded, {self.current_tweet}. Exiting")
                 break
             self.current_tweet.display()
             msg = self.generate_message()
@@ -920,7 +924,7 @@ class JsonLInteractiveClassifier:
             if option == "1":
                 details = JsonLInteractiveClassifier.get_user_details(
                     self.current_tweet)
-                ic(details)
+                logging.debug(f"Details: {details}")
                 # sleep(2)
                 self.save_user_details(details)
                 self.save_auto_details(
@@ -1028,21 +1032,22 @@ class JsonLInteractiveClassifier:
 
         output = self.load_traduction(tweet.id, target_language_code)
         if output is not None:
-            ic(f"Cached Translation: {output}")
+            logging.debug(f"Cached Translation: {output}")
             return output
         else:
             output = ""
 
         split_text, mentions_and_hashtags = JsonLInteractiveClassifier.\
             text_to_list(tweet)
-
-        contents = JsonLInteractiveClassifier.clean_contents(
-            ic(split_text))
+        logging.debug(str(split_text))
+        logging.debug(str(mentions_and_hashtags))
+        contents = JsonLInteractiveClassifier.clean_contents(split_text)
         # If something to translate
         if len(contents) > 0:
+            logging.debug(contents)
             response: TranslateTextResponse = self.translate_client.\
                 translate_text(
-                    contents=ic(contents),
+                    contents=contents,
                     target_language_code=target_language_code,
                     parent=f"projects/{self.google_credentials.project_id}",
                 )
@@ -1050,7 +1055,7 @@ class JsonLInteractiveClassifier:
             recomposed_translation = JsonLInteractiveClassifier.lists_to_text(
                 response.translations,
                 split_text,
-                ic(mentions_and_hashtags)
+                mentions_and_hashtags
             )
             output = recomposed_translation
         self.save_tranduction(
@@ -1169,11 +1174,3 @@ class JsonLInteractiveClassifier:
         m_and_h = tweet.user_mentions() + tweet.hashtags()
         m_and_h.sort(key=lambda x: x["indices"][0])
         return m_and_h
-
-
-def test():
-    """
-    test function
-    """
-    print("Tested")
-    return

@@ -1,9 +1,8 @@
-import json
+import json, logging
 from time import sleep
 import requests
 from tweet_rehydrate.cache import Cache, Request
 from typing import Union, Tuple, List
-from icecream import ic
 
 
 # Source https://developer.twitter.com/en/docs/twitter-api/tweets/lookup/api-reference/get-tweets-id
@@ -161,12 +160,12 @@ class TSess():
         is_tweet: bool = True, is_v2: bool = True
     ) -> Tuple[str, int]:
         if self.cache.check(base_url, params=params):
-            ic("Value in Cache")
+            logging.debug("Value in Cache")
         elif id in self.ERROR_DICT.keys():
-            ic("Previous Error Found!")
+            logging.debug("Previous Error Found!")
             return json.dumps(self.ERROR_DICT[id][2]), self.ERROR_DICT[id][1]
         else:
-            ic("Need to request value")
+            logging.debug("Need to request value")
             sleep(self.SLEEP_TIME)
             response = requests.get(base_url, params=params, auth=self.auth)
             response.status_code
@@ -177,11 +176,10 @@ class TSess():
                 if is_tweet and is_v2:
                     if type(r) is list:
                         r = r[0]
-                # ic(r)
                 sleep(0.0005)
                 if "errors" in r.keys() and "data" not in r.keys() and is_tweet:
                     error: str = r["errors"][0]["title"]
-                    ic(f"{id} - Twitter Error Returned: {error}")
+                    logging.debug(f"{id} - Twitter Error Returned: {error}")
                     hash = self.cache.uri_hash(base_url, params=params)
                     error_code = 440
                     self.ERROR_DICT.update({id: (hash, error_code, r)})
@@ -197,7 +195,7 @@ class TSess():
                 self.ERROR_DICT.update({id: (hash, error_code, response.text)})
                 with open(self.ERROR_LOG, "w") as handler:
                     json.dump(self.ERROR_DICT, handler, indent=2)
-                ic(f"Could not load tweet: {response.reason}")
+                logging.debug(f"Could not load tweet: {response.reason}")
                 return response.text, response.status_code
         return self.cache.get(base_url, params=params), 200
 
@@ -244,40 +242,5 @@ class TSess():
                 f"Invalid id type: {type(id)}. Only <class int> and <class str> are acceptable.")
         url = base_url + id
         headers = {}
-        ic(f"\n\nRequesting tweet {id} with uri: \n\t'{url}'")
-        # if self.cache.check(url, params=self.PARAMS):
-        #     ic("Value in Cache")
-        # elif id in self.ERROR_DICT.keys():
-        #     ic("Previous Error Found!")
-        #     return json.dumps(self.ERROR_DICT[id][2]), self.ERROR_DICT[id][1]
-        # else:
-        #     ic("Need to request value")
-        #     sleep(self.SLEEP_TIME)
-        #     response = requests.get(url, params=self.PARAMS, auth=self.auth)
-        #     response.status_code
-        #     if response.status_code == 200:
-        #         data= response.text
-        #         sleep(0.0005)
-        #         r:dict = json.loads(data)
-        #         sleep(0.0005)
-        #         if "errors" in r.keys() and "data" not in r.keys():
-        #             error:str =r["errors"][0]["title"]
-        #             ic(f"{id} - Twitter Error Returned: {error}")
-        #             hash = self.cache.uri_hash(url, params=self.PARAMS)
-        #             error_code = 440
-        #             self.ERROR_DICT.update({id: (hash, error_code, r)})
-        #             with open(self.ERROR_LOG, "w") as handler:
-        #                 json.dump(self.ERROR_DICT, handler,indent=2)
-        #             return data, error_code # Using code 440 for any Twitter API error code found
-        #         else:
-        #             self.cache.store(uri=url, value=data, params=self.PARAMS, method="GET")
-        #     else:
-        #         hash = self.cache.uri_hash(url, params=self.PARAMS)
-        #         error_code = response.status_code
-        #         self.ERROR_DICT.update({id: (hash, error_code, response.text)})
-        #         with open(self.ERROR_LOG, "w") as handler:
-        #             json.dump(self.ERROR_DICT, handler,indent=2)
-        #         ic(f"Could not load tweet: {response.reason}")
-        #         return response.text, response.status_code
-        # return self.cache.get(url, params=self.PARAMS), 200
+        logging.debug(f"Requesting tweet {id} with uri: '{url}'")
         return self.load_request(base_url=url, params=self.PARAMS)
