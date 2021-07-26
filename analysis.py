@@ -1,10 +1,7 @@
 import json
 import pickle
 import os.path
-from sys import getsizeof
-from typing import OrderedDict, Union, List, Tuple
-from tweet_rehydrate.cache import JsonlHandler
-import pandas as pd
+from typing import Union, List, Tuple
 
 
 class TweetMedia:

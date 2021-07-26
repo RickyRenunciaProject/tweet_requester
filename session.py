@@ -1,8 +1,7 @@
 import json
 from time import sleep
 import requests
-from os.path import isfile
-from tweet_rehydrate.cache import Cache, md5, sha1, HashType, Request
+from tweet_rehydrate.cache import Cache, Request
 from typing import Union, Tuple, List
 from icecream import ic
 
@@ -103,7 +102,7 @@ class TSess():
         self.failed_ids = []
 
     def load_tweet_batch(
-        self, ids: list,
+        self, ids: List[str],
         base_url="https://api.twitter.com/2/tweets"
     ) -> Union[str, None]:
         # https://api.twitter.com/2/tweets?ids=1228393702244134912,1227640996038684673,1199786642791452673&tweet.fields=created_at&expansions=author_id&user.fields=created_at

@@ -1,16 +1,14 @@
 import os
 import os.path
 import datetime
-from typing import Union, Tuple, TypedDict, TypeVar, Dict
+from typing import TypedDict, TypeVar, Dict
 from sortedcontainers import SortedList
 import zlib
 from enum import Enum
 from hashlib import md5, sha1
-from datetime import datetime, timedelta
+from datetime import datetime
 import pickle
 from sys import getsizeof
-
-from requests.api import request
 
 
 def get_size(obj: object, seen=None):
