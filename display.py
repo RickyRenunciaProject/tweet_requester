@@ -5,7 +5,7 @@ from typing import Tuple, List, Union
 
 from google.cloud.translate_v3.types.translation_service import TranslateTextResponse
 from proto.fields import RepeatedField
-from tweet_rehydrate.analysis import TweetJLAnalyzer, TweetAnalyzer, \
+from analysis import TweetJLAnalyzer, TweetAnalyzer, \
     getsizeof, TweetMedia, TweetPhoto, TweetVideo, json
 from cache import SimpleCache
 from session import TSess
@@ -147,6 +147,127 @@ class JsonLInteractiveClassifier:
         # self.load_random_tweet()
         if kwargs.get("start_inmediately", False):
             self.StartEvaluations()
+
+    def update_database(self):
+        self.connect()
+        cur = self.cursor()
+
+        cur.execute('''CREATE TABLE tweet_user_detail (
+            tweet_id TEXT,
+            description TEXT,
+            is_meme INTEGER,
+            has_slang INTEGER,
+            PRIMARY KEY("tweet_id"));''')
+        cur.execute("""CREATE INDEX tweet_user_detail_has_slang
+            ON tweet_user_detail(has_slang);
+        """)
+        cur.execute("""CREATE INDEX tweet_user_detail_is_meme
+            ON tweet_user_detail(is_meme);
+        """)
+        self.commit()
+
+        cur.execute('''CREATE TABLE tweet_auto_detail (
+            tweet_id TEXT,
+            isBasedOn TEXT,
+            identifier TEXT,
+            url TEXT,
+            dateCreated TEXT,
+            datePublished TEXT,
+            user_id TEXT,
+            has_media INTEGER,
+            language TEXT,
+            text TEXT,
+            PRIMARY KEY("tweet_id"));''')
+        cur.execute("""CREATE INDEX tweet_auto_detail_has_media
+            ON tweet_auto_detail(has_media);
+        """)
+        self.commit()
+
+        cur.execute('''CREATE TABLE user (
+            user_id TEXT,
+            user_url TEXT,
+            screen_name TEXT,
+            PRIMARY KEY("user_id"));''')
+        self.commit()
+
+        cur.execute('''CREATE TABLE tweet_match_media(
+            tweet_id TEXT,
+            media_id TEXT,
+            PRIMARY KEY("tweet_id", "media_id"));''')
+        self.commit()
+
+        cur.execute('''CREATE TABLE media (
+            media_id TEXT,
+            media_url TEXT,
+            type TEXT,
+            PRIMARY KEY("media_id"));''')
+        self.commit()
+
+        cur.execute("""
+            SELECT 
+                tweet_id,
+                has_media,
+                description,
+                is_meme,
+                language,
+                has_slang
+            FROM tweet_detail;""")
+        rows = cur.fetchall()
+
+        for tweet_id, has_media, description, is_meme, language, has_slang in rows:
+            tweet = TweetInteractiveClassifier(
+                    tweet_id, session=self.tweet_session)
+            cur.execute(
+                f"""INSERT INTO tweet_user_detail
+                (
+                    "tweet_id", "description",
+                    "is_meme", "has_slang"
+                )
+                VALUES (?, ?, ?, ?);""",
+                (tweet.id, description, is_meme, has_slang)
+            )
+            self.commit()
+
+            cur.execute(
+                f"""INSERT INTO tweet_auto_detail
+                (
+                    "tweet_id",
+                    "has_media",
+                    "language"
+                )
+                VALUES (?, ?, ?);""",
+                (tweet.id, tweet.hasMedia, tweet.language())
+            )
+            self.commit()
+
+            cur.execute(
+                f"""INSERT INTO user
+                (
+                    "user_id",
+                    "user_url",
+                    "screen_name"
+                )
+                VALUES (?, ?, ?);""",
+                (
+                    tweet.user_id,
+                    f"https://twitter.com/{tweet.user_screen_name}",
+                    tweet.user_screen_name)
+            )
+            self.commit()
+
+            for media in tweet.localMedia:
+                cur.execute(
+                    f"""INSERT INTO tweet_media
+                    (
+                        "tweet_id",
+                        "has_media",
+                        "language"
+                    )
+                    VALUES (?, ?, ?);""",
+                    (tweet.id, tweet.hasMedia, language)
+                )
+            self.commit()
+                
 
     def initialize(self, tweet_ids_file: str):
         """Prepares a new SQLite database for usage.
