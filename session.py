@@ -2,7 +2,7 @@ import json
 from time import sleep
 import requests
 from os.path import isfile
-from cache import Cache, md5, sha1, HashType, Request
+from tweet_rehydrate.cache import Cache, md5, sha1, HashType, Request
 from typing import Union, Tuple, List
 from icecream import ic
 
@@ -144,6 +144,18 @@ class TSess():
         }
         params.update(new_params)
         return TSess.BASE_URL_11, params
+    
+    @staticmethod
+    def generate_batch_URI_11(tweet_ids: List[str], params: dict = {}):
+        tweet_ids_str = ",".join(tweet_ids)
+        new_params = {
+            "id": tweet_ids_str,
+            "include_entities": True,
+            "tweet_mode": "extended",  # Testing to include Extended Entities
+            "trim_user": False,
+        }
+        params.update(new_params)
+        return TSess.BASE_URL_11, params
 
     def load_request(
         self, base_url: str, params: dict,
@@ -203,6 +215,22 @@ class TSess():
             base_url, params = TSess.generate_URI_11(id, params=self.PARAMS)
         else:
             base_url, params = TSess.generate_URI_11(id, params={})
+
+        return self.load_request(base_url=base_url, params=params)
+    
+    def load_tweet_batch_11(self, ids: List[str], v2: bool = True) -> Tuple[str, int]:
+        for id in ids:
+            try:
+                assert id.isnumeric(
+                ), f"id {type(id)} provided is not a valid string representation of an integer."
+            except:
+                raise Exception(
+                    f"Invalid id type: {type(id)}. Only numeric <class str> are acceptable.")
+        if v2:
+            params=self.PARAMS
+        else:
+            params={}
+        base_url, params = TSess.generate_batch_URI_11(ids, params=params)
 
         return self.load_request(base_url=base_url, params=params)
 

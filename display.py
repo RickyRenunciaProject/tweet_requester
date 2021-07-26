@@ -2,25 +2,25 @@ from functools import cmp_to_key
 from os import environ
 from sqlite3.dbapi2 import Cursor
 from typing import Tuple, List, Union
+from datetime import datetime
 
 from google.cloud.translate_v3.types.translation_service import TranslateTextResponse
 from proto.fields import RepeatedField
-from analysis import TweetJLAnalyzer, TweetAnalyzer, \
+from tweet_rehydrate.analysis import TweetJLAnalyzer, TweetAnalyzer, \
     getsizeof, TweetMedia, TweetPhoto, TweetVideo, json
-from cache import SimpleCache
-from session import TSess
+from tweet_rehydrate.cache import SimpleCache
+from tweet_rehydrate.session import TSess
 import ipywidgets as widgets
 from IPython.core.display import display, HTML, clear_output, display_html, \
     display_javascript, update_display, Javascript
 import sqlite3
 from os.path import isfile, isdir
 from shutil import move
-from time import sleep, time
+from time import sleep, time, mktime, strptime
 from icecream import ic
 import requests
 from enum import Enum
 from queue import Queue
-from time import time
 from google.cloud import translate
 from google.oauth2 import service_account
 
@@ -148,7 +148,7 @@ class JsonLInteractiveClassifier:
         if kwargs.get("start_inmediately", False):
             self.StartEvaluations()
 
-    def update_database(self):
+    def update_database_v1_v2(self, dateCreated:float, git_commit:str=""):
         self.connect()
         cur = self.cursor()
 
@@ -171,8 +171,8 @@ class JsonLInteractiveClassifier:
             isBasedOn TEXT,
             identifier TEXT,
             url TEXT,
-            dateCreated TEXT,
-            datePublished TEXT,
+            dateCreated FLOAT,
+            datePublished FLOAT,
             user_id TEXT,
             has_media INTEGER,
             language TEXT,
@@ -206,74 +206,47 @@ class JsonLInteractiveClassifier:
         cur.execute("""
             SELECT 
                 tweet_id,
-                has_media,
                 description,
                 is_meme,
-                language,
                 has_slang
             FROM tweet_detail;""")
-        rows = cur.fetchall()
+        rows: List[Tuple[str, str, str, str]] = cur.fetchall()
 
-        for tweet_id, has_media, description, is_meme, language, has_slang in rows:
+        cur.execute('''
+        CREATE TABLE update (
+            version REAL,
+            git_commit TEXT,
+            timestamp REAL,
+            PRIMARY KEY("git_commit"));''')
+
+        cur.execute(
+            """
+            INSERT INTO update
+            (
+                "version",
+                "git_commit",
+                "timestamp"
+            ) VALUES (?, ?, ?);""",
+            (0.2, git_commit, datetime.now().timestamp())
+
+        )
+
+        cur.close()
+
+        for user_detail in rows:
+            tweet_id = user_detail[0]
             tweet = TweetInteractiveClassifier(
-                    tweet_id, session=self.tweet_session)
-            cur.execute(
-                f"""INSERT INTO tweet_user_detail
-                (
-                    "tweet_id", "description",
-                    "is_meme", "has_slang"
-                )
-                VALUES (?, ?, ?, ?);""",
-                (tweet.id, description, is_meme, has_slang)
-            )
-            self.commit()
+                tweet_id, session=self.tweet_session)
+            self.save_user_details(user_detail)
 
-            cur.execute(
-                f"""INSERT INTO tweet_auto_detail
-                (
-                    "tweet_id",
-                    "has_media",
-                    "language"
-                )
-                VALUES (?, ?, ?);""",
-                (tweet.id, tweet.hasMedia, tweet.language())
-            )
-            self.commit()
+            self.save_auto_details(tweet, dateCreated=dateCreated)
 
-            cur.execute(
-                f"""INSERT INTO user
-                (
-                    "user_id",
-                    "user_url",
-                    "screen_name"
-                )
-                VALUES (?, ?, ?);""",
-                (
-                    tweet.user_id,
-                    f"https://twitter.com/{tweet.user_screen_name}",
-                    tweet.user_screen_name)
-            )
-            self.commit()
-
-            for media in tweet.localMedia:
-                cur.execute(
-                    f"""INSERT INTO media
-                    (
-                        "media_id",
-                        "media_url",
-                        "type",
-                    )
-                    VALUES (?, ?, ?);""",
-                    (
-                        media.id,
-                        media.url(),
-                        media.mtype()
-                    )
-                )
-                self.commit()
-                
+            self.finalize_tweet(self, tweet_id=tweet.id)
 
     def initialize(self, tweet_ids_file: str):
+        self.initialize_v2(tweet_ids_file)
+    
+    def initialize_v2(self, tweet_ids_file: str):
         """Prepares a new SQLite database for usage.
         """
         self.original_filename = tweet_ids_file
@@ -289,6 +262,87 @@ class JsonLInteractiveClassifier:
         self.connect()
 
         cur = self.db.cursor()
+
+        cur.execute(
+            'CREATE TABLE tweet (tweet_id TEXT, state INTEGER, PRIMARY KEY("tweet_id") );'
+        )
+        cur.execute("""CREATE INDEX tweet_state ON tweet (state);""")
+
+        cur.execute('''CREATE TABLE tweet_user_detail (
+            tweet_id TEXT,
+            description TEXT,
+            is_meme INTEGER,
+            has_slang INTEGER,
+            PRIMARY KEY("tweet_id"));''')
+        cur.execute("""CREATE INDEX tweet_user_detail_has_slang
+            ON tweet_user_detail(has_slang);
+        """)
+        cur.execute("""CREATE INDEX tweet_user_detail_is_meme
+            ON tweet_user_detail(is_meme);
+        """)
+        self.commit()
+
+        cur.execute('''CREATE TABLE tweet_auto_detail (
+            tweet_id TEXT,
+            isBasedOn TEXT,
+            identifier TEXT,
+            url TEXT,
+            dateCreated FLOAT,
+            datePublished FLOAT,
+            user_id TEXT,
+            has_media INTEGER,
+            language TEXT,
+            text TEXT,
+            PRIMARY KEY("tweet_id"));''')
+        cur.execute("""CREATE INDEX tweet_auto_detail_has_media
+            ON tweet_auto_detail(has_media);
+        """)
+        self.commit()
+
+        cur.execute('''CREATE TABLE user (
+            user_id TEXT,
+            user_url TEXT,
+            screen_name TEXT,
+            PRIMARY KEY("user_id"));''')
+        self.commit()
+
+        cur.execute('''CREATE TABLE tweet_match_media(
+            tweet_id TEXT,
+            media_id TEXT,
+            PRIMARY KEY("tweet_id", "media_id"));''')
+        self.commit()
+
+        cur.execute('''CREATE TABLE media (
+            media_id TEXT,
+            media_url TEXT,
+            type TEXT,
+            PRIMARY KEY("media_id"));''')
+        self.commit()
+
+        # Traduction Cache in DB
+        cur.execute('''CREATE TABLE tweet_traduction (
+            tweet_id TEXT,
+            target_language_code TEXT,
+            traduction TEXT,
+            PRIMARY KEY( "target_language_code", "tweet_id"  ));''')
+        self.commit()
+
+    def initialize_v1(self, tweet_ids_file: str):
+        """Prepares a new SQLite database for usage.
+        """
+        self.original_filename = tweet_ids_file
+        self.sqlite_filename = "." + tweet_ids_file + ".db"
+        if isfile(self.sqlite_filename):
+            try:
+                self.connect()
+                return
+            except:
+                # Backup Old DB File
+                move(self.sqlite_filename, self.sqlite_filename+"."+str(time()))
+        # Connect and initialize tables
+        self.connect()
+
+        cur = self.cursor()
 
         cur.execute(
             'CREATE TABLE tweet (tweet_id TEXT, state INTEGER, PRIMARY KEY("tweet_id") );'
@@ -424,7 +478,12 @@ class JsonLInteractiveClassifier:
             ic("Skipping Retweet!")
             self.load_next_tweet()
 
-    def StartEvaluations(self):
+    def StartEvaluations(
+        self,
+        stages: List[PROCESSING_STAGES]=[
+            PROCESSING_STAGES.PREPROCESSED
+        ]
+    ):
         """
         Wrapper around display_another method that has a goodbye message.
 
@@ -433,11 +492,17 @@ class JsonLInteractiveClassifier:
         return:
             None
         """
-        self.display_another()
+        self.display_another(stages=stages)
         clear_output()
-        display(HTML("<h1>Thank you!</h1><h2>Exited from evaluation</h2>"))
+        display(HTML('<h1 class="alert alert-success">Thank you!</h1><h2 class="alert alert-info">Exited from evaluation</h2>'))
 
-    def load_next_tweet(self) -> Union[TweetInteractiveClassifier, None]:
+    def load_next_tweet(
+        self,
+        stages: List[PROCESSING_STAGES]=[
+            PROCESSING_STAGES.UNPROCESSED,
+            PROCESSING_STAGES.PREPROCESSED
+        ]
+    ) -> Union[TweetInteractiveClassifier, None]:
         """
         Performs multiple actions to get the next useful tweet.
 
@@ -448,7 +513,7 @@ class JsonLInteractiveClassifier:
         """
         # If queue is empty add more values.
         if self._next_tweet_id.empty():
-            self.load_random_tweets()
+            self.load_random_tweets(stages=stages)
             if self._next_tweet_id.empty():
                 # Return no current tweet as no more can be found.
                 self.current_tweet_id = None
@@ -487,10 +552,11 @@ class JsonLInteractiveClassifier:
             except:
                 self.skip_failed()
 
-            # On fail load next tweet
             if self.current_tweet is not None:
+                # If Retweet skip
                 self.check_retweet()
             else:
+                # On fail load next tweet
                 self.load_next_tweet()
         else:
             cur.close()
@@ -501,12 +567,26 @@ class JsonLInteractiveClassifier:
 
         return self.current_tweet
 
-    def load_random_tweets(self, n: int = 5):
+    def load_random_tweets(
+        self, n: int = 5,
+        stages: List[PROCESSING_STAGES]=[
+            PROCESSING_STAGES.UNPROCESSED,
+            PROCESSING_STAGES.PREPROCESSED
+        ]
+    ):
         self.connect()
         cur = self.cursor()
+        slots = ""
+        inputs = []
+        for stage in stages:
+            slots += "?, "
+            inputs.append(stage.value)
+        slots = slots[:-2]
+        inputs.append(n)
+        inputs = tuple(inputs)
         cur.execute(
-            """SELECT tweet_id FROM tweet WHERE state = ? ORDER BY RANDOM() LIMIT ?;""",
-            (PROCESSING_STAGES.UNPROCESSED.value, n))
+            f"""SELECT tweet_id FROM tweet WHERE state in ({slots}) ORDER BY RANDOM() LIMIT ?;""",
+            inputs)
         rows: List[Tuple[str]] = cur.fetchall()
         for (tweet_id,) in rows:
             self._next_tweet_id.put(tweet_id)
@@ -571,6 +651,36 @@ class JsonLInteractiveClassifier:
 
         return tweet.id, has_local_media, description, is_meme, language, has_slang
 
+    @staticmethod
+    def get_user_details(tweet: TweetInteractiveClassifier) -> Tuple:
+        description = input("Enter a short description:\n")
+        # has_media = tweet.hasMedia
+        has_slang = "?"
+        while has_slang[0] not in "ynYN":
+            has_slang = input("Does the message include slang?\n(Y/N)")
+            if type(has_slang) is not str:
+                has_slang = "?"
+                continue
+        if has_slang[0] in "yY":
+            has_slang = True
+        else:
+            has_slang = False
+
+        is_meme = "?"
+        if tweet.hasMedia:
+            while is_meme[0] not in "ynYN":
+                is_meme = input("Is the image a meme?\n(Y/N)")
+                if type(is_meme) is not str:
+                    is_meme = "?"
+            if is_meme[0] in "yY":
+                is_meme = True
+            else:
+                is_meme = False
+        else:
+            is_meme = False
+
+        return tweet.id, description, is_meme, has_slang
+
     def save_details(self, details: Tuple[str, bool, str, bool, Union[str, None], bool]):
         self.connect()
         cur = self.cursor()
@@ -593,6 +703,110 @@ class JsonLInteractiveClassifier:
         self.commit()
         cur.close()
 
+    def save_user_details(self, details: Tuple[str, str, bool, bool]):
+        self.connect()
+        cur = self.cursor()
+        cur.execute(
+            f"""INSERT INTO tweet_detail
+            (
+                "tweet_id",
+                "description",
+                "is_meme",
+                "has_slang"
+            )
+            VALUES (?, ?, ?, ?);""",
+            details
+        )
+        self.commit()
+        cur.close()
+
+    def save_auto_details(
+        self,
+        tweet: TweetInteractiveClassifier,
+        dateCreated: Union[float, datetime, None]
+    ):
+        """Save all details that can be extracted from the data dictionary 
+        without human interaction."""
+        self.connect()
+        cur = self.cursor()
+        if dateCreated is None:
+            dateCreated = datetime.now()
+        if type(dateCreated) is datetime:
+            dateCreated = dateCreated.timestamp()
+        try:
+            datePublished: datetime = datetime.strptime(
+                string=tweet.data.get("created_at"),
+                format='%a %b %d %H:%M:%S +0000 %Y'
+            )
+            datePublished = datePublished.timestamp()
+        except:
+            ic("Could not generate datePublished",tweet.data.get("created_at"))
+            raise
+
+        cur.execute(
+            f"""INSERT INTO tweet_auto_detail
+            (
+                "tweet_id",
+                "isBasedOn",
+                "identifier",
+                "url",
+                "dateCreated",
+                "datePublished",
+                "user_id"
+                "has_media",
+                "language",
+                "text"
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);""",
+            (
+                tweet.id,
+                tweet.isBasedOn(),
+                tweet.urlByIDs(),
+                tweet.url(),
+                dateCreated,
+                datePublished,
+                tweet.user_id,
+                tweet.hasMedia,
+                tweet.language(),
+                tweet.text()
+            )
+        )
+        self.commit()
+
+        cur.execute(
+            f"""INSERT INTO user
+            (
+                "user_id",
+                "user_url",
+                "screen_name"
+            )
+            VALUES (?, ?, ?);""",
+            (
+                tweet.user_id,
+                f"https://twitter.com/{tweet.user_screen_name}",
+                tweet.user_screen_name
+            )
+        )
+        self.commit()
+
+        for media in tweet.localMedia:
+            cur.execute(
+                f"""INSERT INTO media
+                (
+                    "media_id",
+                    "media_url",
+                    "type",
+                )
+                VALUES (?, ?, ?);""",
+                (
+                    media.id,
+                    media.url(),
+                    media.mtype()
+                )
+            )
+            self.commit()
+        cur.close()
+
     def display_tweet(self, tweet_id, target_language_code: str = ""):
         try:
             tweet = TweetInteractiveClassifier(
@@ -613,13 +827,13 @@ class JsonLInteractiveClassifier:
                 html_content += f"<p>Translation to '{target_language_code}':</p>"
                 html_content += f"<p>{text_translation}<p>"
         display(HTML(html_content))
-    
+
     def display_accepted(
-                self,
-                per_page=5,
-                page=0,
-                target_language_code="en"
-            ):
+        self,
+        per_page=5,
+        page=0,
+        target_language_code="en"
+    ):
         self.connect()
         cur = self.cursor()
         offset = per_page * page
@@ -661,7 +875,12 @@ class JsonLInteractiveClassifier:
             html_content += "</div>"
         display(HTML(html_content))
 
-    def display_another(self):
+    def display_another(
+        self,
+        stages: List[PROCESSING_STAGES]=[
+            PROCESSING_STAGES.UNPROCESSED,
+        ]
+    ):
         while True:
             clear_output()
             # self.previous_tweet = self.current_tweet
@@ -674,7 +893,7 @@ class JsonLInteractiveClassifier:
                 if retry_count > 15:
                     ic(retry_count, "Too many missing")
                     break
-                self.current_tweet = self.load_next_tweet()
+                self.current_tweet = self.load_next_tweet(stages=stages)
             if not ic(self.current_tweet):
                 ic("No tweet loaded", self.current_tweet)
 
@@ -684,12 +903,16 @@ class JsonLInteractiveClassifier:
 
             option = input(msg)
             if option == "1":
-                details = JsonLInteractiveClassifier.get_details(
+                details = JsonLInteractiveClassifier.get_user_details(
                     self.current_tweet)
                 ic(details)
                 # sleep(2)
-                self.save_details(details)
-                # self.finalize_current()
+                self.save_user_details(details)
+                self.save_auto_details(
+                    self.current_tweet, 
+                    dateCreated=datetime.now().timestamp()
+                )
+                self.finalize_current()
             elif option == "2":
                 self.reject_current()
             elif option == "3":
@@ -697,62 +920,68 @@ class JsonLInteractiveClassifier:
             elif option == "4":
                 self.skip_current()
                 break
+    
+    def preprocessN(self, n=20):
+        pass
+
+    def finalize_current(self, *args, **kwargs):
+        c_time = time()
+        if c_time-self._last_submit > self._delay:
+            self._last_submit = c_time
+            self.finalize_tweet(self.current_tweet.id)
+
+    def finalize_tweet(self, tweet_id: str):
+        self.tweet_set_state(
+            tweet_id,
+            PROCESSING_STAGES.FINALIZED
+        )
 
     def reject_current(self, *args, **kwargs):
         c_time = time()
         if c_time-self._last_submit > self._delay:
             self._last_submit = c_time
-            ic("Rejected", kwargs.get("value", ""))
-            self.connect()
-            cur = self.cursor()
-            cur.execute(
-                """UPDATE tweet
-                SET state = ?
-                WHERE tweet_id = ?;""",
-                (PROCESSING_STAGES.REJECTED.value, self.current_tweet_id,)
-            )
-            self.commit()
-            cur.close()
-            self.close()
+            self.reject_tweet(self.current_tweet.id)
+    
+    def reject_tweet(self, tweet_id: str):
+        self.tweet_set_state(
+            tweet_id,
+            PROCESSING_STAGES.REJECTED
+        )
+
+    def tweet_set_state(self, tweet_id: str, state: PROCESSING_STAGES):
+        self.connect()
+        cur = self.cursor()
+        cur.execute(
+            """UPDATE tweet
+            SET state = ?
+            WHERE tweet_id = ?;""",
+            (state.value, tweet_id,)
+        )
+        self.commit()
+        cur.close()
+        self.close()
 
     def skip_current(self, *args, **kwargs):
         c_time = time()
         if c_time-self._last_submit > self._delay:
             self._last_submit = c_time
-            ic("Skipped", kwargs.get("value", ""))
-            self.connect()
-            cur = self.cursor()
-            cur.execute(
-                "UPDATE tweet \
-                SET state = ? \
-                WHERE tweet_id = ?;",
-                (PROCESSING_STAGES.UNPROCESSED.value, self.current_tweet_id,)
-            )
-            self.commit()
-            cur.close()
-            self.close()
+            self.skip_tweet(self.current_tweet.id)
+    
+    def skip_tweet(self, tweet_id: str, fail=False):
+        if fail:
+            state = PROCESSING_STAGES.UNAVAILABLE_EMBEDING
+        else:
+            state = PROCESSING_STAGES.UNPROCESSED
+        self.tweet_set_state(
+            tweet_id,
+            state
+        )
 
     def skip_failed(self, *args, **kwargs):
         c_time = time()
         if c_time-self._last_submit > self._delay:
             self._last_submit = c_time
-            ic("Skipped", kwargs.get("value", ""))
-            self.connect()
-            cur = self.cursor()
-            cur.execute(f"""
-                UPDATE tweet 
-                SET state = ? 
-                WHERE tweet_id = ?;""",
-                        (PROCESSING_STAGES.UNAVAILABLE_EMBEDING.value,
-                         self.current_tweet_id,)
-                        )
-            self.commit()
-            cur.close()
-            self.close()
-            # self.current_tweet=None
-            # self.current_tweet_id=None
-            # clear_output()
-            # self.display_another()
+            self.skip_tweet(self.current_tweet.id, fail=True)
 
     def generate_message(self) -> str:
         msg = """
@@ -782,7 +1011,7 @@ class JsonLInteractiveClassifier:
             # target language missing or if translate client missing.
             return ""
 
-        output = self.load_traduction(tweet, target_language_code)
+        output = self.load_traduction(tweet.id, target_language_code)
         if output is not None:
             ic(f"Cached Translation: {output}")
             return output
@@ -816,7 +1045,7 @@ class JsonLInteractiveClassifier:
 
     def load_traduction(
         self,
-        tweet: TweetInteractiveClassifier,
+        tweet_id: str,
         target_language_code: str
     ) -> Union[None, str]:
         output = None
@@ -825,7 +1054,7 @@ class JsonLInteractiveClassifier:
         cur.execute(
             """SELECT traduction FROM tweet_traduction
             WHERE tweet_id=? AND target_language_code=?;""",
-            (tweet.id, target_language_code)
+            (tweet_id, target_language_code)
         )
         rows = cur.fetchall()  # Max one response due to PRIMARY KEY CONSTRAINT
         cur.close()
