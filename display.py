@@ -138,19 +138,20 @@ class JsonLInteractiveClassifier:
     def get_database_version(self):
         self.connect()
         cur = self.cursor()
-
-        cur.execute('''
-            SELECT version 
-            FROM db_update 
-            ORDER BY timestamp DESC
-            LIMIT 1''')
-        
-        rows = cur.fetchall()
+        db_version=0
+        try:
+            cur.execute('''
+                SELECT version 
+                FROM db_update 
+                ORDER BY timestamp DESC
+                LIMIT 1''')
+            
+            rows = cur.fetchall()
+            for row in rows:
+                db_version = float(row[0])
         cur.close()
         self.close()
-        for row in rows:
-            return float(row[0])
-        return 0
+        return db_version
 
     def update_database_v01_v02(self, dateCreated: float, git_commit: str = ""):
         if self.get_database_version() >= 0.2:
