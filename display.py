@@ -134,28 +134,31 @@ class JsonLInteractiveClassifier:
             url="https://platform.twitter.com/widgets.js")
         if kwargs.get("start_inmediately", False):
             self.StartEvaluations()
-    
+
     def get_database_version(self):
         self.connect()
         cur = self.cursor()
-        db_version=0
+        db_version = 0
         try:
             cur.execute('''
                 SELECT version 
                 FROM db_update 
                 ORDER BY timestamp DESC
                 LIMIT 1''')
-            
+
             rows = cur.fetchall()
             for row in rows:
                 db_version = float(row[0])
+        except Exception as err:
+            logging.warning(err)
         cur.close()
         self.close()
         return db_version
 
     def update_database_v01_v02(self, dateCreated: float, git_commit: str = ""):
         if self.get_database_version() >= 0.2:
-            logging.warning(f"Database version is {self.get_database_version()} >= 0.2. Skipping update.")
+            logging.warning(
+                f"Database version is {self.get_database_version()} >= 0.2. Skipping update.")
             return
         self.connect()
         cur = self.cursor()
@@ -567,8 +570,9 @@ class JsonLInteractiveClassifier:
                 logging.error(err)
                 raise
 
-        if PROCESSING_STAGES(state_value) in stages :
+        if PROCESSING_STAGES(state_value) in stages:
             # Update or insert with state Reviewing.
+            self._previous_state = PROCESSING_STAGES(state_value)
             self.connect()
             cur = self.cursor()
             cur.execute(
@@ -633,7 +637,8 @@ class JsonLInteractiveClassifier:
             self.close()
         except:
             self.current_tweet_id = None
-            logging.debug(f"Set self.current_tweet_id='{self.current_tweet_id}'")
+            logging.debug(
+                f"Set self.current_tweet_id='{self.current_tweet_id}'")
         if self.current_tweet_id is not None:
             try:
                 self.current_tweet = TweetInteractiveClassifier(
@@ -728,6 +733,20 @@ class JsonLInteractiveClassifier:
         self.commit()
         cur.close()
 
+    def has_user_details(self, tweet_id: str):
+        self.connect()
+        cur = self.cursor()
+        cur.execute(
+            f"""SELECT * FROM tweet_user_detail
+            WHERE tweet_id=?;""",
+            (tweet_id,)
+        )
+        rows = cur.fetchall()
+        cur.close()
+        if len(rows) > 0:
+            return True
+        return False
+
     def save_user_details(self, details: Tuple[str, str, bool, bool]):
         self.connect()
         cur = self.cursor()
@@ -772,7 +791,7 @@ class JsonLInteractiveClassifier:
             raise
 
         cur.execute(
-            f"""INSERT INTO tweet_auto_detail
+            f"""INSERT OR REPLACE INTO tweet_auto_detail
             (
                 "tweet_id",
                 "isBasedOn",
@@ -806,7 +825,7 @@ class JsonLInteractiveClassifier:
         self.commit()
 
         cur.execute(
-            f"""INSERT INTO tweet_user
+            f"""INSERT OR REPLACE INTO tweet_user
             (
                 "user_id",
                 "user_url",
@@ -870,7 +889,8 @@ class JsonLInteractiveClassifier:
                 else:
                     raise
         if media_duplicates > 0:
-            logging.info(f"Found {media_duplicates} duplicates.\nLast Error: {media_duplicates_errors[-1]}")
+            logging.info(
+                f"Found {media_duplicates} duplicates.\nLast Error: {media_duplicates_errors[-1]}")
         cur.close()
 
     def display_tweet(self, tweet_id, target_language_code: str = ""):
@@ -965,7 +985,19 @@ class JsonLInteractiveClassifier:
                 break
             self.current_tweet.display()
             msg = self.generate_message()
-
+            next_state = self._previous_state
+            if not self.has_user_details(self.current_tweet.id):
+                if self._previous_state not in [
+                    PROCESSING_STAGES.REJECTED,
+                    PROCESSING_STAGES.RETWEET,
+                ]:
+                    self.save_auto_details(
+                        self.current_tweet,
+                        dateCreated=datetime.now().timestamp()
+                    )
+                    next_state = PROCESSING_STAGES.PREPROCESSED
+                else:
+                    continue
             option = input(msg)
             if option == "1":
                 details = JsonLInteractiveClassifier.get_user_details(
@@ -973,41 +1005,51 @@ class JsonLInteractiveClassifier:
                 logging.debug(f"Details: {details}")
                 # sleep(2)
                 self.save_user_details(details)
-                self.save_auto_details(
-                    self.current_tweet,
-                    dateCreated=datetime.now().timestamp()
-                )
                 self.finalize_current()
             elif option == "2":
                 self.reject_current()
             elif option == "3":
-                self.skip_current()
+                self.skip_current(
+                    next_state=next_state
+                )
             elif option == "4":
-                self.skip_current()
+                self.skip_current(
+                    next_state=next_state
+                )
                 break
 
-    def preprocess_batch(self, n:int=20):
-        stages=[
+    def preprocess_batch(self, n: int = 20):
+        stages = [
             PROCESSING_STAGES.UNPROCESSED
         ]
         preload_n: int = int(n * 0.75)
         self.load_random_tweets(
-            n= preload_n,
+            n=preload_n,
             stages=stages
         )
-        count=0
+        count = 0
         while count < n or not self._next_tweet_id.empty():
-            tweet=self.load_next_tweet(stages=stages)
-            self.save_auto_details(
-                tweet,
-                datetime.now().timestamp()
-            )
+            if self._next_tweet_id.empty():
+                self.load_random_tweets(
+                    n=n-count,
+                    stages=stages
+                )
+            tweet = self.load_next_tweet(stages=stages)
+
+            if not self.has_user_details(tweet.id):
+                self.save_auto_details(
+                    tweet,
+                    datetime.now().timestamp()
+                )
+                count += 1
+                clear_output()
+                display(
+                    HTML(f'<p class="alert alert-success">Preprocessed {count}<p>'))
+
             self.tweet_set_state(
-                tweet.id, 
+                tweet.id,
                 PROCESSING_STAGES.PREPROCESSED
             )
-            count+=1
-
 
     def finalize_current(self, *args, **kwargs):
         c_time = time()
@@ -1050,13 +1092,24 @@ class JsonLInteractiveClassifier:
         c_time = time()
         if c_time-self._last_submit > self._delay:
             self._last_submit = c_time
-            self.skip_tweet(self.current_tweet.id)
+            self.skip_tweet(
+                self.current_tweet.id,
+                next_state=kwargs.get("next_state", None)
+            )
 
-    def skip_tweet(self, tweet_id: str, fail=False):
+    def skip_tweet(
+        self,
+        tweet_id: str,
+        fail=False,
+        next_state: Union[PROCESSING_STAGES, None] = None
+    ):
         if fail:
             state = PROCESSING_STAGES.UNAVAILABLE_EMBEDING
         else:
-            state = PROCESSING_STAGES.UNPROCESSED
+            if isinstance(next_state, PROCESSING_STAGES):
+                state = next_state
+            else:
+                state = self._previous_state
         self.tweet_set_state(
             tweet_id,
             state
