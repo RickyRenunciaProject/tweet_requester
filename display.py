@@ -134,8 +134,28 @@ class JsonLInteractiveClassifier:
             url="https://platform.twitter.com/widgets.js")
         if kwargs.get("start_inmediately", False):
             self.StartEvaluations()
+    
+    def get_database_version(self):
+        self.connect()
+        cur = self.cursor()
 
-    def update_database_v1_v2(self, dateCreated: float, git_commit: str = ""):
+        cur.execute('''
+            SELECT version 
+            FROM db_update 
+            ORDER BY timestamp DESC
+            LIMIT 1''')
+        
+        rows = cur.fetchall()
+        cur.close()
+        self.close()
+        for row in rows:
+            return float(row[0])
+        return 0
+
+    def update_database_v01_v02(self, dateCreated: float, git_commit: str = ""):
+        if self.get_database_version() >= 0.2:
+            logging.warning(f"Database version is {self.get_database_version()} >= 0.2. Skipping update.")
+            return
         self.connect()
         cur = self.cursor()
 
@@ -517,7 +537,7 @@ class JsonLInteractiveClassifier:
                 self.current_tweet_id = None
                 self.current_tweet = None
                 logging.info("No more tweets to process.")
-                return
+                return None
 
         # Get next tweet_id from Queue and clear current_tweet object
         self.current_tweet_id: str = self._next_tweet_id.get()
@@ -530,21 +550,26 @@ class JsonLInteractiveClassifier:
             """SELECT state FROM tweet WHERE tweet_id = ?;""", (self.current_tweet_id,))
         rows: List[Tuple[int]] = cur.fetchall()
 
+        cur.close()
+        self.close()
+
         # Tweet should always be added to the table before the queue
         try:
-            state = rows[0][0]
+            state_value = rows[0][0]
         except:
             logging.warning(
                 f"Tweet{self.current_tweet_id} not in table!!! Trying to add.")
             try:
                 self.add_to_queue(self.current_tweet_id)
-                state = PROCESSING_STAGES.UNPROCESSED.value
+                state_value = PROCESSING_STAGES.UNPROCESSED.value
             except Exception as err:
                 logging.error(err)
                 raise
 
-        if PROCESSING_STAGES(state) == PROCESSING_STAGES.UNPROCESSED:
+        if PROCESSING_STAGES(state_value) in stages :
             # Update or insert with state Reviewing.
+            self.connect()
+            cur = self.cursor()
             cur.execute(
                 "INSERT OR REPLACE INTO tweet(tweet_id, state) VALUES(?, ?);",
                 (self.current_tweet_id, PROCESSING_STAGES.REVIEWING.value))
@@ -556,18 +581,12 @@ class JsonLInteractiveClassifier:
                     self.current_tweet_id, session=self.tweet_session)
             except:
                 self.skip_failed()
-
-            if self.current_tweet is not None:
-                # If Retweet skip
-                self.check_retweet()
-            else:
-                # On fail load next tweet
+                self.current_tweet = None
                 self.load_next_tweet()
+            self.check_retweet()
         else:
-            cur.close()
-            self.close()
             # Try again
-            logging.info(f"Tweet state: {state}. Loading Next Tweet.")
+            logging.info(f"Tweet state: {state_value}. Loading Next Tweet.")
             self.load_next_tweet()
 
         return self.current_tweet
@@ -978,7 +997,10 @@ class JsonLInteractiveClassifier:
         count=0
         while count < n or not self._next_tweet_id.empty():
             tweet=self.load_next_tweet(stages=stages)
-            self.save_auto_details(tweet)
+            self.save_auto_details(
+                tweet,
+                datetime.now().timestamp()
+            )
             self.tweet_set_state(
                 tweet.id, 
                 PROCESSING_STAGES.PREPROCESSED
@@ -1043,7 +1065,7 @@ class JsonLInteractiveClassifier:
         c_time = time()
         if c_time-self._last_submit > self._delay:
             self._last_submit = c_time
-            self.skip_tweet(self.current_tweet.id, fail=True)
+            self.skip_tweet(self.current_tweet_id, fail=True)
 
     def generate_message(self) -> str:
         msg = """
