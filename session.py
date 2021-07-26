@@ -175,6 +175,7 @@ class TSess():
                 r: List[dict] = json.loads(data)
                 if is_tweet and is_v2:
                     if type(r) is list:
+                        assert len(r) > 0, "List is empty! Response was empty list."
                         r = r[0]
                 sleep(0.0005)
                 if "errors" in r.keys() and "data" not in r.keys() and is_tweet:
