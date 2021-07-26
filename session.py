@@ -143,7 +143,7 @@ class TSess():
         }
         params.update(new_params)
         return TSess.BASE_URL_11, params
-    
+
     @staticmethod
     def generate_batch_URI_11(tweet_ids: List[str], params: dict = {}):
         tweet_ids_str = ",".join(tweet_ids)
@@ -216,7 +216,7 @@ class TSess():
             base_url, params = TSess.generate_URI_11(id, params={})
 
         return self.load_request(base_url=base_url, params=params)
-    
+
     def load_tweet_batch_11(self, ids: List[str], v2: bool = True) -> Tuple[str, int]:
         for id in ids:
             try:
@@ -226,9 +226,9 @@ class TSess():
                 raise Exception(
                     f"Invalid id type: {type(id)}. Only numeric <class str> are acceptable.")
         if v2:
-            params=self.PARAMS
+            params = self.PARAMS
         else:
-            params={}
+            params = {}
         base_url, params = TSess.generate_batch_URI_11(ids, params=params)
 
         return self.load_request(base_url=base_url, params=params)

@@ -120,15 +120,15 @@ class TweetAnalyzer:
                 raise
         self._isRetweet()
         self._isQuote()
-        self.retweetCount = self.data.get("retweet_count", 0)
-        self.quoteCount = self.data.get("quote_count", 0)
+        self.retweetCount: int = int(self.data.get("retweet_count", 0))
+        self.quoteCount: int = int(self.data.get("quote_count", 0))
         self.favoriteCount = self.data.get("favorite_count", 0)
         if not self.onlyLocalMedia:
             self._hasMedia()
         self._hasLocalMedia()
 
     def isBasedOn(self) -> str:
-        isBasedOn=""
+        isBasedOn = ""
         if self.isRetweet:
             isBasedOn = self.retweeted_status.id
         elif self.isQuote:
@@ -247,7 +247,7 @@ class TweetAnalyzer:
     def user_mentions(self) -> List[dict]:
         entities: dict = self.data.get("entities", {})
         return entities.get("user_mentions", [])
-    
+
     def hashtags(self) -> List[dict]:
         entities: dict = self.data.get("entities", {})
         return entities.get("hashtags", [])
