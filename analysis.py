@@ -11,18 +11,18 @@ class TweetMedia:
     def __init__(self, data: dict, source_tweet=None):
         self.data = data
         try:
-            self.id = data["id_str"]
+            self.id: str = data["id_str"]
         except:
             try:
-                self.id = data["id"]
+                self.id: str = data["id"]
             except:
                 raise
-        self.source_tweet = source_tweet
+        self.source_tweet: Union[str, None] = source_tweet
 
-    def mtype(self):
+    def mtype(self) -> str:
         return self.data["type"]
 
-    def url(self):
+    def url(self) -> str:
         return self.data["media_url_https"]
 
     def __str__(self):
