@@ -615,7 +615,7 @@ class JsonLInteractiveClassifier:
         return:
             None
         """
-        self.display_another(stages=stages)
+        self.display_next(stages=stages)
         clear_output()
         display(HTML('<h1 class="alert alert-success">Thank you!</h1><h2 class="alert alert-info">Exited from evaluation</h2>'))
 
@@ -783,10 +783,22 @@ class JsonLInteractiveClassifier:
         return tweet.id, has_local_media, description, is_meme, language, has_slang
 
     @staticmethod
-    def get_user_details(tweet: TweetInteractiveClassifier) -> Tuple:
+    def get_slang() -> List[str]:
+        """Interface to get comma separated list of slang words."""
+        msg = \
+            "Enter a coma separated list of slang words.\nEXAMPLE: trash,joder,puto,asshole,welebicho"
+        slang_words=input(msg)
+        clean = []
+        for dirty in slang_words.split(","):
+            clean.append(dirty.strip())
+        return clean
+
+    @staticmethod
+    def get_user_details(tweet: TweetInteractiveClassifier) -> Tuple[Tuple[str,str,bool,bool], List[str]]:
         description = input("Enter a short description:\n")
         # has_media = tweet.hasMedia
         has_slang = "?"
+        slang_words=[]
         while has_slang[0] not in "ynYN":
             has_slang = input("Does the message include slang?\n(Y/N)")
             if type(has_slang) is not str:
@@ -794,6 +806,7 @@ class JsonLInteractiveClassifier:
                 continue
         if has_slang[0] in "yY":
             has_slang = True
+            slang_words = JsonLInteractiveClassifier.get_slang()
         else:
             has_slang = False
 
@@ -810,7 +823,7 @@ class JsonLInteractiveClassifier:
         else:
             is_meme = False
 
-        return tweet.id, description, is_meme, has_slang
+        return (tweet.id, description, is_meme, has_slang), slang_words
 
     def save_details(self, details: Tuple[str, bool, str, bool, Union[str, None], bool]):
         self.connect()
@@ -1062,7 +1075,7 @@ class JsonLInteractiveClassifier:
             html_content += "</div>"
         display(HTML(html_content))
 
-    def display_another(
+    def display_next(
         self,
         stages: List[PROCESSING_STAGES] = [
             PROCESSING_STAGES.UNPROCESSED,
@@ -1101,11 +1114,13 @@ class JsonLInteractiveClassifier:
                     continue
             option = input(msg)
             if option == "1":
-                details = JsonLInteractiveClassifier.get_user_details(
+                details, slang_words = JsonLInteractiveClassifier.get_user_details(
                     self.current_tweet)
                 logging.debug(f"Details: {details}")
                 # sleep(2)
                 self.save_user_details(details)
+                for slang in slang_words:
+                    self.save_slang(slang, self.current_tweet.id)
                 self.finalize_current()
             elif option == "2":
                 self.reject_current()
