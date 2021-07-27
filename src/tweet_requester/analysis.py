@@ -128,7 +128,7 @@ class TweetAnalyzer:
         self._isQuote()
         self.retweetCount: int = int(self.data.get("retweet_count", 0))
         self.quoteCount: int = int(self.data.get("quote_count", 0))
-        self.favoriteCount = self.data.get("favorite_count", 0)
+        self.favoriteCount: int = int(self.data.get("favorite_count", 0))
         if not self.onlyLocalMedia:
             self._hasMedia()
         self._hasLocalMedia()
@@ -337,25 +337,25 @@ class TweetAnalyzer:
         return output
 
     @staticmethod
-    def compare_by_quote_count(set: bool = True):
-        TweetAnalyzer._compare_quoteCount = set
+    def compare_by_favorite_count(set: bool = True):
+        TweetAnalyzer._favorite_quoteCount = set
 
     @staticmethod
     def compare_by_retweet_count(set: bool = True):
-        TweetAnalyzer._compare_quoteCount = not set
+        TweetAnalyzer._favorite_quoteCount = not set
 
     def _effective_size(self) -> int:
         """Helper function for comparisons.
-        The class attribute `TweetAnalyzer._compare_quoteCount` 
-        controls if retweetCount or quoteCount is used.
+        The class attribute `TweetAnalyzer._favorite_quoteCount` 
+        controls if retweetCount or favoriteCount is used.
 
         Returns:
             int: 0, retweetCount or quoteCount.
         """
         if self.isRetweet:
             return 0
-        if getattr(TweetAnalyzer, "_compare_quoteCount", False):
-            return self.quoteCount
+        if getattr(TweetAnalyzer, "_favorite_quoteCount", False):
+            return self.favoriteCount
         else:
             return self.retweetCount
 
