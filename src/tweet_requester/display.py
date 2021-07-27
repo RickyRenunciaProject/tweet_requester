@@ -6,7 +6,6 @@ from google.cloud.translate_v3.types.translation_service import TranslateTextRes
 from proto.fields import RepeatedField
 from .analysis import TweetAnalyzer, json
 from .session import TSess
-import ipywidgets as widgets
 from IPython.core.display import display, HTML, clear_output, Javascript
 import sqlite3
 from os.path import isfile
@@ -124,15 +123,6 @@ class JsonLInteractiveClassifier:
                 not found. Verify the name or path."
             self.connect()
 
-        # Prepare Widgets
-        self.description = widgets.Textarea
-        self.button_reject = widgets.Button(description="Reject")
-        self.button_reject.on_click(self.reject_current)
-        self.button_skip = widgets.Button(description="Skip")
-        self.button_skip.on_click(self.skip_current)
-        self.embeding = widgets.HTML()
-        self.javascript = Javascript(
-            url="https://platform.twitter.com/widgets.js")
         if kwargs.get("start_inmediately", False):
             self.StartEvaluations()
 
