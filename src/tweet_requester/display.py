@@ -151,6 +151,7 @@ class JsonLInteractiveClassifier:
         version = 0.4
         expected_version = 0.3
         db_version = self.get_database_version()
+        logging.info(f"DB VERSION = {db_version}")
         if db_version > expected_version:
             logging.warning(
                 f"Database version is greater than expected {db_version} > {expected_version}. This update does not apply."
@@ -199,6 +200,7 @@ class JsonLInteractiveClassifier:
             ) VALUES (?, ?, ?);""",
             (version, git_commit, datetime.now().timestamp())
         )
+        self.commit()
         cur.close()
         self.close()
 
