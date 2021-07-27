@@ -170,6 +170,9 @@ class JsonLInteractiveClassifier:
             return
         self.connect()
         cur = self.cursor()
+        logging.debug("DROP TABLE tweet_slang;")
+        cur.execute("DROP TABLE IF EXISTS tweet_slang;")
+        self.commit()
         logging.debug("CREATING TABLE tweet_slang ")
         cur.execute('''CREATE TABLE tweet_slang (
             tweet_id TEXT,
