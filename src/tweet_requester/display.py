@@ -1,5 +1,5 @@
 from os import environ
-from sqlite3.dbapi2 import Cursor
+from sqlite3.dbapi2 import Cursor, version
 from typing import Tuple, List, Union
 from datetime import datetime
 from google.cloud.translate_v3.types.translation_service import TranslateTextResponse
@@ -146,6 +146,65 @@ class JsonLInteractiveClassifier:
         self.close()
         return db_version
     
+    def update_database_v03_v04(self, git_commit: str = ""):
+        """Update database to version 0.4 from 0.3."""
+        version = 0.4
+        expected_version = 0.3
+        db_version = self.get_database_version()
+        if db_version > expected_version:
+            logging.warning(
+                f"Database version is greater than expected {db_version} > {expected_version}. This update does not apply."
+            )
+            return
+        elif db_version < expected_version :
+            logging.warning(
+                f"Database version is {db_version} < {expected_version}. Try updating to version 0.2 first using 'update_database_v01_v02' method."
+            )
+            return
+        self.connect()
+        cur = self.cursor()
+        logging.debug("tweet_auto_detail ADD column favoriteCount INTEGER;")
+        cur.execute("""ALTER TABLE tweet_auto_detail
+            ADD favoriteCount INTEGER;""")
+        self.commit()
+        cur.execute("""SELECT tweet_id FROM tweet_auto_detail;""")
+        tweet_ids: List[Tuple[str]]=cur.fetchall()
+        done = True
+        for idx, (tweet_id,) in enumerate(tweet_ids):
+            done = False
+            data, code = self.tweet_session.load_tweet_11(tweet_id)
+            data = json.loads(data)[0]
+            assert code == 200, "Could not get response!"
+            favoriteCount: int = data.get("favorite_count", 0)
+            cur.execute("""UPDATE tweet_auto_detail
+                SET favoriteCount = ?
+                WHERE tweet_id = ? ;""",
+                (favoriteCount, tweet_id))
+            if idx%20==0:
+                logging.debug(f"Updated {idx} records favoriteCount.")
+                # commit every 20
+                self.commit()
+                done = True
+        if not done:
+            self.commit()
+        
+        logging.debug("New database version version.")
+        cur.execute(
+            """
+            INSERT INTO db_update
+            (
+                "version",
+                "git_commit",
+                "timestamp"
+            ) VALUES (?, ?, ?);""",
+            (version, git_commit, datetime.now().timestamp())
+        )
+        cur.close()
+        self.close()
+
+        
+
+
     def update_database_v02_v03(self, git_commit: str = ""):
         """Update database to version 0.3 from 0.2."""
         db_version = self.get_database_version()
