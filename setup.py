@@ -1,7 +1,7 @@
 from setuptools import setup
 setup(
   install_requires = [
-    "google-cloud-translate",
-    "ipython",
+    "ipython>=7.25.0",
+    "google-cloud-translate>=3.3.1",
   ],
 )
