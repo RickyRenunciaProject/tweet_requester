@@ -154,6 +154,41 @@ class JsonLInteractiveClassifier:
         cur.close()
         self.close()
         return db_version
+    
+    def update_database_v02_v03(self, git_commit: str = ""):
+        """Update database to version 0.3 from 0.2."""
+        db_version = self.get_database_version()
+        if db_version > 0.2:
+            logging.warning(
+                f"Database version is greater than expected {db_version} > 0.2. This update does not apply."
+            )
+            return
+        elif db_version < 0.2 :
+            logging.warning(
+                f"Database version is {db_version} < 0.2. Try updating to version 0.2 first using 'update_database_v01_v02' method."
+            )
+            return
+        self.connect()
+        cur = self.cursor()
+        logging.debug("CREATING TABLE tweet_slang ")
+        cur.execute('''CREATE TABLE tweet_slang (
+            tweet_id TEXT,
+            slang TEXT,
+            PRIMARY KEY("tweet_id", "slang"));''')
+        self.commit()
+
+        logging.debug("Registering new update.")
+        cur.execute(
+            """
+            INSERT INTO db_update
+            (
+                "version",
+                "git_commit",
+                "timestamp"
+            ) VALUES (?, ?, ?);""",
+            (0.3, git_commit, datetime.now().timestamp())
+        )
+        self.commit()
 
     def update_database_v01_v02(self, dateCreated: float, git_commit: str = ""):
         if self.get_database_version() >= 0.2:
@@ -248,7 +283,7 @@ class JsonLInteractiveClassifier:
                 is_meme,
                 has_slang
             FROM tweet_detail;""")
-        rows: List[Tuple[str, str, str, str]] = cur.fetchall()
+        rows: List[Tuple[str, str, int, int]] = cur.fetchall()
         cur.close()
 
         for user_detail in rows:
@@ -262,9 +297,73 @@ class JsonLInteractiveClassifier:
             self.finalize_tweet(tweet_id=tweet.id)
 
     def initialize(self, tweet_ids_file: str):
+        version = self.initialize_v3(tweet_ids_file)
+
+        self.connect()
+        cur = self.cursor()
+
+        with open(self.original_filename, "r") as source:
+            n = 0
+            commits = 0
+            commit_loop = 5000
+            records = []
+            for k in source:
+                k = str(k).strip()
+                if k != "":
+                    records.append((k, 0))
+                    n += 1
+                    if n % commit_loop == 0:
+                        commits += 1
+                        cur.executemany(
+                            f"INSERT INTO tweet VALUES (?, ?);", records)
+                        self.db.commit()
+                        records = []
+                        if commits >= 100:
+                            break
+
+                else:
+                    break
+            if len(records) > 0:
+                cur.execute(f"INSERT INTO tweet VALUES (?, ?);", records)
+                self.commit()
+                records = []
+        logging.debug("Saving initial version.")
+        cur.execute(
+            """
+            INSERT INTO db_update
+            (
+                "version",
+                "git_commit",
+                "timestamp"
+            ) VALUES (?, ?, ?);""",
+            (version, "", datetime.now().timestamp())
+        )
+        cur.close()
+        self.close()
+    
+    def initialize_v3(self, tweet_ids_file: str) -> int:
+        """Prepares a new SQLite database v0.3 for usage.
+        This method calls on previous initialization v0.2
+        """
         self.initialize_v2(tweet_ids_file)
 
-    def initialize_v2(self, tweet_ids_file: str):
+        logging.debug("CREATING TABLE tweet_slang ")
+
+        self.connect()
+        cur = self.cursor()
+    
+        cur.execute('''CREATE TABLE tweet_slang (
+            tweet_id TEXT,
+            slang TEXT,
+            PRIMARY KEY("tweet_id", "slang"));''')
+        self.commit()
+
+        cur.close()
+        self.close()
+        return 0.3
+
+
+    def initialize_v2(self, tweet_ids_file: str) -> int:
         """Prepares a new SQLite database for usage.
         """
         self.original_filename = tweet_ids_file
@@ -346,6 +445,8 @@ class JsonLInteractiveClassifier:
             traduction TEXT,
             PRIMARY KEY( "target_language_code", "tweet_id"  ));''')
         self.commit()
+
+        return 0.2
 
     def initialize_v1(self, tweet_ids_file: str):
         """Prepares a new SQLite database for usage.
@@ -1214,6 +1315,23 @@ class JsonLInteractiveClassifier:
             (tweet.id, target_language_code, traduction)
         )
         self.commit()
+        cur.close()
+    
+    def save_slang(self, slang: str, tweet_id: str):
+        self.connect()
+        cur = self.cursor()
+        try:
+            cur.execute(
+                "INSERT INTO tweet_slang VALUES (?, ?)",
+                (tweet_id, slang)
+            )
+            self.commit()
+        except sqlite3.IntegrityError as err:
+            if "unique" in str(err).lower:
+                logging.warning(err)
+            else:
+                logging.error(err)
+                raise
         cur.close()
 
     @staticmethod
