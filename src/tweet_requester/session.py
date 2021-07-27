@@ -1,7 +1,7 @@
 import json, logging
 from time import sleep
 import requests
-from tweet_requester.cache import Cache, Request
+from .cache import Cache, Request
 from typing import Union, Tuple, List
 
 

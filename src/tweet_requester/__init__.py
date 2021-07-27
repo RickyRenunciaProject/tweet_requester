@@ -1,9 +1,9 @@
-from tweet_requester.display import \
+from .display import \
     JsonLInteractiveClassifier, \
     TweetInteractiveClassifier, \
     prepare_google_credentials
-from tweet_requester.analysis import \
+from .analysis import \
     TweetMedia, TweetPhoto, TweetVideo
-from tweet_requester.session import TSess
-from tweet_requester.cache import Cache
+from .session import TSess
+from .cache import Cache
 
