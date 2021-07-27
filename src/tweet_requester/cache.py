@@ -1,13 +1,10 @@
 import os, logging
 import os.path
 import datetime
-from typing import TypedDict, TypeVar, Dict
-from sortedcontainers import SortedList
 import zlib
 from enum import Enum
 from hashlib import md5, sha1
 from datetime import datetime
-import pickle
 from sys import getsizeof
 
 
@@ -239,124 +236,5 @@ class Cache():
         self.store_bytes(uri, value.encode("utf-8"), method, params, headers)
 
 
-K = TypeVar("K")
-V = TypeVar("V")
 
-
-class Retrievable(TypedDict):
-    value: V
-    timestamp: datetime
-
-    def __init__(self, value: V):
-        self.value = value
-        self._timestamp()
-
-    def _timestamp(self):
-        self.timestamp = datetime.now()
-
-    def get(self) -> V:
-        self._timestamp()
-        return self.value
-
-
-class SimpleCache:
-    TWO_YEARS_IN_DAYS = 780.50
-    MAX_STORAGE = 1 * 1024 * 1024 * 1024 / 16  # 1 GigaByte / 16 = 64MegaByte
-    CACHE: Dict[K, Retrievable] = {}
-    FORGETFUL = True
-
-    def __init__(self, filename: str, **kargs):
-        self.cache_file = filename
-        if os.path.isfile(self.cache_file):
-            self.reload()
-        else:
-            for key, value in kargs.items():
-                try:
-                    assert hasattr(
-                        self, key), f"Object has no attribute named {key} or {key.lower()}."
-                    self.__dict__.update({key: value})
-                except Exception as e:
-                    logging.error("During Cache Initialization: ")
-                    logging.error(e)
-                    raise
-
-    def __del__(self):
-        self.save()
-
-    def reload(self):
-        self.__dict__.update(pickle.load(open(self.cache_file, 'rb')))
-
-    def save(self):
-        pickle.dump(self.__dict__, open(self.cache_file, 'wb'))
-
-    def get(self, key: K, **kwargs) -> V:
-        if key in self.CACHE.keys():
-            stored: Retrievable = self.CACHE[key]
-            value = stored.get()
-#             self.CACHE.update({key: stored})
-            self.verify_age()
-        else:
-            value = self._get(key)
-            self.verify_age()
-            self.verify_size()
-        return value
-
-    def _get(self, key: K) -> V:
-        """Place holder function to handler actual request/get process and store into CACHE"""
-        pass
-
-    def verify_age(self):
-        now = datetime.now()
-        for key, value in self.CACHE.items():
-            if (now - value.timestamp).days > self.TWO_YEARS_IN_DAYS:
-                self.CACHE.pop(key)
-            else:
-                break
-
-    def verify_size(self):
-        current_storage = get_size(self.CACHE)
-        while current_storage > self.MAX_STORAGE:
-            c_key = self.CACHE.keys()[0]
-            c_value = self.CACHE.pop(c_key)
-            current_storage -= get_size(c_value)
-
-
-class FileRetrievable(Retrievable):
-    seek: int
-
-    def __init__(self, value: V, seek: int):
-        self.seek = seek
-        super().__init__(value=value)
-
-
-class JsonlHandler(SimpleCache):
-    LINE_SEEK = SortedList()
-
-    def __init__(self, filename: str):
-        self.filename = filename
-        self.cache_file = os.path.join(os.path.dirname(
-            filename), ".cache_", str(os.path.basename(filename)) + ".pkl")
-        if os.path.isfile(self.cache_file):
-            self.reload()
-
-    def _get(self, key: int) -> str:
-        seek_key = self.LINE_SEEK.bisect_left(key)
-        position = 0
-        with open(self.filename, 'r') as handler:
-            position = handler.tell()
-            if seek_key > 0:
-                # Jump as close as possible
-                prev_key = self.LINE_SEEK[seek_key - 1]
-                seek_position = self.CACHE[prev_key]["seek"]
-                handler.seek(seek_position)
-                for _ in range(key-prev_key):
-                    next(handler)
-            else:
-                for _ in range(key-1):
-                    next(handler)
-            seek = handler.tell()
-            value = handler.readline()
-            store = FileRetrievable(value=value, seek=seek)
-            self.CACHE.update({key: store})
-        return value
 
