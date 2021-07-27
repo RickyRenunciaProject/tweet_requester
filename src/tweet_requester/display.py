@@ -4,8 +4,8 @@ from typing import Tuple, List, Union
 from datetime import datetime
 from google.cloud.translate_v3.types.translation_service import TranslateTextResponse
 from proto.fields import RepeatedField
-from tweet_rehydrate.analysis import TweetAnalyzer, json
-from tweet_rehydrate.session import TSess
+from tweet_requester.analysis import TweetAnalyzer, json
+from tweet_requester.session import TSess
 import ipywidgets as widgets
 from IPython.core.display import display, HTML, clear_output, Javascript
 import sqlite3
