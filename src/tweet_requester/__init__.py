@@ -3,7 +3,7 @@ from .display import \
     TweetInteractiveClassifier, \
     prepare_google_credentials
 from .analysis import \
-    TweetMedia, TweetPhoto, TweetVideo
+    TweetAnalyzer,TweetMedia, TweetPhoto, TweetVideo
 from .session import TSess
 from .cache import Cache
 
