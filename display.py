@@ -53,6 +53,7 @@ class PROCESSING_STAGES(Enum):
     UNAVAILABLE_EMBEDING = 4
     RETWEET = 5
     PREPROCESSED = 6
+    FINALIZED_MISSING_SLANG = 7
 
 
 class TweetInteractiveClassifier(TweetAnalyzer):
@@ -178,6 +179,17 @@ class JsonLInteractiveClassifier:
             tweet_id TEXT,
             slang TEXT,
             PRIMARY KEY("tweet_id", "slang"));''')
+        self.commit()
+
+        logging.debug("Changing state of Finalized to Missing Slang")
+        cur.execute("""UPDATE tweet
+            SET state = ?
+            WHERE state = ?;""",
+            (
+                PROCESSING_STAGES.FINALIZED_MISSING_SLANG.value,
+                PROCESSING_STAGES.FINALIZED.value
+            )
+        )
         self.commit()
 
         logging.debug("Registering new update.")
@@ -1411,21 +1423,6 @@ class JsonLInteractiveClassifier:
 
     @staticmethod
     def sorted_mentions_and_hashtags(tweet: TweetInteractiveClassifier) -> List[dict]:
-        from functools import cmp_to_key
-
-        def compare(a: dict, b: dict):
-            ai: int = a["indices"][0]
-            bi: int = b["indices"][0]
-            if ai < bi:
-                return -1
-            elif ai > bi:
-                return 1
-            else:
-                return 0
-
-        def key_func(a: dict) -> int:
-            return a["indices"][0]
-
         m_and_h = tweet.user_mentions() + tweet.hashtags()
         m_and_h.sort(key=lambda x: x["indices"][0])
         return m_and_h
