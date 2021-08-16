@@ -1,5 +1,6 @@
 import json
 from typing import Union, List
+from logging import log, warn, error, exception
 
 
 class TweetMedia:
@@ -101,6 +102,15 @@ class TweetAnalyzer:
             self.data = json.loads(self.data)
         self.extractMeta()
 
+    def entities(self) -> dict:
+        return self.data.get("entities", {})
+    
+    def extended_entities(self) -> dict:
+        return self.data.get('extended_entities', {})
+    
+    def hashtags(self) -> List[dict]:
+        return self.entities().get("hashtags", [])
+
     def extractMeta(self):
         """Upon receiving the data dictionary extracts multiple facts from it.
         """
@@ -126,9 +136,31 @@ class TweetAnalyzer:
                 raise
         self._isRetweet()
         self._isQuote()
-        self.retweetCount: int = int(self.data.get("retweet_count", 0))
-        self.quoteCount: int = int(self.data.get("quote_count", 0))
-        self.favoriteCount: int = int(self.data.get("favorite_count", 0))
+
+        # Get RetweetCount
+        self.retweetCount: Union[int, None] = self.data.get("retweet_count", None)
+        if self.retweetCount is not None:
+            try:
+                self.retweetCount = int(self.retweetCount)
+            except Exception as err:
+                exception(err)
+        self.quoteCount: Union[int, None] = self.data.get("quote_count", None)
+
+        # Get QuoteCount
+        if self.quoteCount is not None:
+            try:
+                self.quoteCount = int(self.quoteCount)
+            except Exception as err:
+                exception(err)
+        self.favoriteCount: Union[int, None] = self.data.get("favorite_count", None)
+
+        # Get FavoriteCount
+        if self.favoriteCount is not None:
+            try:
+                self.favoriteCount = int(self.favoriteCount)
+            except Exception as err:
+                exception(err)
+                
         if not self.onlyLocalMedia:
             self._hasMedia()
         self._hasLocalMedia()
@@ -163,9 +195,11 @@ class TweetAnalyzer:
         """Part of initialization. Sets the value for self.hasMedia and
         calls self.extractMedia() method.
         """
-        self.hasMedia = 'media_url_https' in str(
-            self.data) or 'media_url' in str(self.data)
+        data_str = str(self.data)
+        media_keys = ['media_url_https', 'media_url' ]
+        self.hasMedia = any(map(data_str.__contains__, media_keys))
         self.extractMedia()
+            
 
     def text(self) -> str:
         """Extracts the text of the tweet. Returns short version of full version missing.
@@ -182,8 +216,9 @@ class TweetAnalyzer:
         """Part of initialization. Sets the value for self.hasLocalMedia,
         sets self.hasMedia if not previously set and calls self.extractMedia() method.
         """
-        self.hasLocalMedia = 'media_url_https' in str(self.data['entities']) or 'media_url' in str(self.data['entities']) or 'media_url_https' in str(
-            self.data.get('extended_entities', {})) or 'media_url' in str(self.data.get('extended_entities', {}))
+        entities_str = str(self.entities()) + str(self.extended_entities())
+        media_keys = ['media_url_https', 'media_url']
+        self.hasLocalMedia = any(map(entities_str.__contains__, media_keys))
         # If hasMedia has not been set before
         if not hasattr(self, "hasMedia"):
             self.hasMedia = self.hasLocalMedia
@@ -198,40 +233,38 @@ class TweetAnalyzer:
                 dive into the quoted and retweeted tweet statuses. Defaults to True.
         """
         media = []
-        if 'entities' in self.data.keys():
-            if 'media' in self.data['entities']:
-                for m in self.data['entities']['media']:
-                    if m["type"].lower() == "photo":
-                        media.append(TweetPhoto(m, self.id))
-                    elif m["type"].lower() == "video":
-                        media.append(TweetVideo(m, self.id))
-                    else:
-                        media.append(TweetMedia(m, self.id))
-        if 'extended_entities' in self.data.keys():
-            if 'media' in self.data['extended_entities'].keys():
-                for m in self.data['extended_entities']['media']:
-                    if m["type"].lower() == "photo":
-                        media.append(TweetPhoto(m, self.id))
-                    elif m["type"].lower() == "video":
-                        media.append(TweetVideo(m, self.id))
-                    else:
-                        media.append(TweetMedia(m, self.id))
+        # if 'entities' in self.data.keys():
+        if 'media' in self.entities().keys():
+            for m in self.data['entities']['media']:
+                if m["type"].lower() == "photo":
+                    media.append(TweetPhoto(m, self.id))
+                elif m["type"].lower() == "video":
+                    media.append(TweetVideo(m, self.id))
+                else:
+                    media.append(TweetMedia(m, self.id))
+        if 'media' in self.extended_entities().keys():
+            for m in self.data['extended_entities']['media']:
+                if m["type"].lower() == "photo":
+                    media.append(TweetPhoto(m, self.id))
+                elif m["type"].lower() == "video":
+                    media.append(TweetVideo(m, self.id))
+                else:
+                    media.append(TweetMedia(m, self.id))
 
+        # Keep a shallow copy of the media list as the local media
+        self.localMedia: List[Union[TweetMedia, TweetVideo, TweetPhoto]] = media.copy()
+        
         # If recursive process the internal media of retweeted or quoted status
-        # Else skip recursion and store in self.localMedia
-        if recursive and getattr(self, "retweeted_status", False):
-            if self.retweeted_status.hasMedia:
-                media = media + self.retweeted_status.media
-        if recursive and getattr(self, "quoted_status", False):
-            if self.quoted_status.hasMedia:
-                media = media + self.quoted_status.media
         if recursive:
+            if getattr(self, "retweeted_status", False):
+                if self.retweeted_status.hasMedia:
+                    media = media + self.retweeted_status.media
+            if getattr(self, "quoted_status", False):
+                if self.quoted_status.hasMedia:
+                    media = media + self.quoted_status.media
             self.media: List[Union[TweetMedia, TweetVideo, TweetPhoto]] = media
         else:
-            self.localMedia: List[Union[TweetMedia,
-                                        TweetVideo, TweetPhoto]] = media
-            if not hasattr(self, "media"):
-                self.media = self.localMedia
+            self.media = self.localMedia
 
     def url(self) -> str:
         """Creates a URL to the tweet using only the tweet id.
