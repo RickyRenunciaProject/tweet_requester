@@ -26,6 +26,11 @@ interacting with twitter records inside a jupyter notebook.
 
 def prepare_google_credentials(credentials_file="")\
         -> Union[service_account.Credentials, None]:
+    """Return Google Credentials object from credentials file.
+
+    Returns:
+        service_account.Credentials: Service Account Credentials Object
+    """
     # If not specified try to get credentials file from environment.
     try:
         if not credentials_file:
@@ -46,6 +51,8 @@ ALL_MEDIA_TYPES = PHOTO_MEDIA_TYPES + VIDEO_MEDIA_TYPES + AUDIO_MEDIA_TYPES
 
 
 class PROCESSING_STAGES(Enum):
+    """Enumarator of the stages in processing a tweet
+    """
     UNPROCESSED = 0
     REVIEWING = 1
     FINALIZED = 2
@@ -57,7 +64,13 @@ class PROCESSING_STAGES(Enum):
 
 
 class TweetInteractiveClassifier(TweetAnalyzer):
-    def __init__(self, tweet_id, session: TSess):
+    def __init__(self, tweet_id: str, session: TSess):
+        """Class Derived from TweetAnalyzer that includes IPython visualizations.
+
+        Args:
+            tweet_id (str): string representing the Tweet ID
+            session (TSess): Twitter Session Object
+        """
         self._session = session
         data, code = session.load_tweet_11(tweet_id)
         data = json.loads(data)[0]
@@ -98,6 +111,16 @@ class JsonLInteractiveClassifier:
         self, tweet_ids_file: str, session: TSess,
         pre_initialized=False, sqlite_db: str = "", **kwargs
     ):
+        """The JsonLInteractiveClassifier works with a list of tweet IDs to generate 
+        an SQLite Database used to analyze the tweets. It aslo includes a web based 
+        IPython GUI to process the data.
+
+        Args:
+            tweet_ids_file (str): File address to a list of Tweet IDs.
+            session (TSess): A Twitter Session object used for all communications.
+            pre_initialized (bool, optional): If true requires sqlite_db to be included and continues with the previous state  of the database. Defaults to False.
+            sqlite_db (str, optional): A specific file address to store the SQLite database, in empty or None defaults to a name derived from tweet_ids_file. Defaults to "".
+        """
         # Set Translation Configuration
         self.google_credentials: service_account.Credentials = \
             kwargs.get("google_credentials", None)
@@ -799,6 +822,14 @@ class JsonLInteractiveClassifier:
 
     @staticmethod
     def get_user_details(tweet: TweetInteractiveClassifier) -> Tuple[Tuple[str,str,bool,bool], List[str]]:
+        """Interface to get information about 
+
+        Args:
+            tweet (TweetInteractiveClassifier): [description]
+
+        Returns:
+            Tuple[Tuple[str,str,bool,bool], List[str]]: [description]
+        """
         description = input("Enter a short description:\n")
         # has_media = tweet.hasMedia
         has_slang = "?"
@@ -817,7 +848,7 @@ class JsonLInteractiveClassifier:
         is_meme = "?"
         if tweet.hasMedia:
             while is_meme[0] not in "ynYN":
-                is_meme = input("Is the image a meme?\n(Y/N)")
+                is_meme = input("Is the multimedia a meme?\n(Y/N)")
                 if type(is_meme) is not str:
                     is_meme = "?"
             if is_meme[0] in "yY":
@@ -829,29 +860,15 @@ class JsonLInteractiveClassifier:
 
         return (tweet.id, description, is_meme, has_slang), slang_words
 
-    def save_details(self, details: Tuple[str, bool, str, bool, Union[str, None], bool]):
-        self.connect()
-        cur = self.cursor()
-        cur.execute(
-            f"""INSERT INTO tweet_detail
-            (
-                "tweet_id", "has_media", "description",
-                "is_meme", "language", "has_slang"
-            )
-            VALUES (?, ?, ?, ?, ?, ?);""",
-            details
-        )
-        self.commit()
-        cur.execute(
-            "UPDATE tweet \
-            SET state = ? \
-            WHERE tweet_id = ?;",
-            (PROCESSING_STAGES.FINALIZED.value, self.current_tweet_id,)
-        )
-        self.commit()
-        cur.close()
-
     def has_user_details(self, tweet_id: str):
+        """Verifies if a specific tweet has already been processed by a user.
+
+        Args:
+            tweet_id (str): The Tweet ID to verify
+
+        Returns:
+            bool: True if user generated details are present in the database.
+        """        
         self.connect()
         cur = self.cursor()
         cur.execute(
@@ -866,6 +883,12 @@ class JsonLInteractiveClassifier:
         return False
 
     def save_user_details(self, details: Tuple[str, str, bool, bool]):
+        """Stores in the database user generated metadata.
+
+        Args:
+            details (Tuple[str, str, bool, bool]): A tuple containing the 
+                data "tweet_id", "description", "is_meme", "has_slang"
+        """      
         self.connect()
         cur = self.cursor()
         cur.execute(
@@ -888,7 +911,13 @@ class JsonLInteractiveClassifier:
         dateCreated: Union[float, datetime, None]
     ):
         """Save all details that can be extracted from the data dictionary 
-        without human interaction."""
+        without human interaction.
+
+        Args:
+            tweet (TweetInteractiveClassifier): A Tweet object used to extract data.
+            dateCreated (Union[float, datetime, None]): A value pointing to the 
+                moment the data was retrieved.
+        """
         self.connect()
         cur = self.cursor()
         if dateCreated is None:
@@ -1014,6 +1043,12 @@ class JsonLInteractiveClassifier:
         cur.close()
 
     def display_tweet(self, tweet_id, target_language_code: str = ""):
+        """Display Tweet with translation if possible. IPython
+
+        Args:
+            tweet_id ([type]): ID of the tweet used to retrieve data from Session.
+            target_language_code (str, optional): Two letter language code. Defaults to "".
+        """        
         try:
             tweet = TweetInteractiveClassifier(
                 tweet_id=tweet_id,
@@ -1040,6 +1075,13 @@ class JsonLInteractiveClassifier:
         page=0,
         target_language_code="en"
     ):
+        """Paginated display of accepted tweets in the dataset
+
+        Args:
+            per_page (int, optional): Number of tweets per page. Defaults to 5.
+            page (int, optional): 0 indexed page number. Defaults to 0.
+            target_language_code (str, optional): Target language for translation. Defaults to "en".
+        """    
         self.connect()
         cur = self.cursor()
         offset = per_page * page
@@ -1059,6 +1101,12 @@ class JsonLInteractiveClassifier:
         tweet_id_list: List[str],
         target_language_code: str = ""
     ):
+        """Displays if available the tweets from a list of IDs.
+
+        Args:
+            tweet_id_list (List[str]): List of Tweet IDs.
+            target_language_code (str, optional): 2 letter language code for translation. Defaults to "".
+        """    
         html_content = ""
         for tweet_id in tweet_id_list:
             try:
@@ -1087,6 +1135,12 @@ class JsonLInteractiveClassifier:
             PROCESSING_STAGES.UNPROCESSED,
         ]
     ):
+        """Function displays an interface and request information about tweets based on a Queue.
+        Once queue is empty new tweets are added if their state appears in the stages list.
+
+        Args:
+            stages (List[PROCESSING_STAGES], optional): Processing stages used to feel the queue. Defaults to [ PROCESSING_STAGES.UNPROCESSED, ].
+        """    
         while True:
             clear_output()
             # self.previous_tweet = self.current_tweet
@@ -1141,6 +1195,13 @@ class JsonLInteractiveClassifier:
                 break
 
     def preprocess_batch(self, n: int = 20):
+        """Preprocess tweets to capture auto details and prepare cache for future reload.
+        Unless no more values in the database, it should preprocess at least `n` tweets, but
+        may preprocess more if retweeted or quoted tweets are added to the queue.
+
+        Args:
+            n (int, optional): Target number of preprocessing tweets. Defaults to 20.
+        """
         stages = [
             PROCESSING_STAGES.UNPROCESSED
         ]
@@ -1174,30 +1235,46 @@ class JsonLInteractiveClassifier:
             )
 
     def finalize_current(self, *args, **kwargs):
+        """Update current tweet state to PROCESSING_STAGES.FINALIZED
+        using debouncing technique.
+        """
         c_time = time()
         if c_time-self._last_submit > self._delay:
             self._last_submit = c_time
             self.finalize_tweet(self.current_tweet.id)
 
     def finalize_tweet(self, tweet_id: str):
+        """Update current tweet state to PROCESSING_STAGES.FINALIZED.
+        """
         self.tweet_set_state(
             tweet_id,
             PROCESSING_STAGES.FINALIZED
         )
 
     def reject_current(self, *args, **kwargs):
+        """Update current tweet state to PROCESSING_STAGES.REJECTED
+        using debouncing technique.
+        """
         c_time = time()
         if c_time-self._last_submit > self._delay:
             self._last_submit = c_time
             self.reject_tweet(self.current_tweet.id)
 
     def reject_tweet(self, tweet_id: str):
+        """Update current tweet state to PROCESSING_STAGES.REJECTED.
+        """
         self.tweet_set_state(
             tweet_id,
             PROCESSING_STAGES.REJECTED
         )
 
     def tweet_set_state(self, tweet_id: str, state: PROCESSING_STAGES):
+        """Set a tweet_id to a specific PROCESSING_STAGE.
+
+        Args:
+            tweet_id (str): ID of the tweet.
+            state (PROCESSING_STAGES): New state for the tweet.
+        """        
         self.connect()
         cur = self.cursor()
         cur.execute(
@@ -1211,6 +1288,9 @@ class JsonLInteractiveClassifier:
         self.close()
 
     def skip_current(self, *args, **kwargs):
+        """Update current tweet state to PROCESSING_STAGES.REJECTED
+        using debouncing technique.
+        """
         c_time = time()
         if c_time-self._last_submit > self._delay:
             self._last_submit = c_time
@@ -1225,6 +1305,14 @@ class JsonLInteractiveClassifier:
         fail=False,
         next_state: Union[PROCESSING_STAGES, None] = None
     ):
+        """Used to set PROCESSING_STAGES.UNAVAILABLE_EMBEDING or other
+        stages upon failure/error or other events.
+
+        Args:
+            tweet_id (str): ID of the tweet
+            fail (bool, optional): If true assigns UNAVAILABLE_EMBEDING. Defaults to False.
+            next_state (Union[PROCESSING_STAGES, None], optional): Next_state used to return to previous or newly expected state. Defaults to None.
+        """        
         if fail:
             state = PROCESSING_STAGES.UNAVAILABLE_EMBEDING
         else:
@@ -1238,12 +1326,19 @@ class JsonLInteractiveClassifier:
         )
 
     def skip_failed(self, *args, **kwargs):
+        """Used to set PROCESSING_STAGES.UNAVAILABLE_EMBEDING upon failure/error.
+        """        
         c_time = time()
         if c_time-self._last_submit > self._delay:
             self._last_submit = c_time
             self.skip_tweet(self.current_tweet_id, fail=True)
 
     def generate_message(self) -> str:
+        """Interface menu including possible translation if environment allows it.
+
+        Returns:
+            str: Text to be displayed on screen.
+        """        
         msg = """
         What should we do?
             1)Accept
@@ -1258,7 +1353,8 @@ class JsonLInteractiveClassifier:
                 self.current_tweet,
                 self.target_language_code
             )
-            msg = f"Translation: {text_translation}\n" + msg
+            if text_translation:
+                msg = f"Translation: {text_translation}\n" + msg
         return msg
 
     def translate_tweet(
@@ -1266,6 +1362,15 @@ class JsonLInteractiveClassifier:
         tweet: TweetInteractiveClassifier,
         target_language_code: str
     ) -> str:
+        """Translates a tweet text to a target language.
+
+        Args:
+            tweet (TweetInteractiveClassifier): Tweet Object
+            target_language_code (str): Target language 2 letter code.
+
+        Returns:
+            str: Translation
+        """    
         if not self.translate_client or not target_language_code:
             # Return empty string if
             # target language missing or if translate client missing.
@@ -1309,6 +1414,15 @@ class JsonLInteractiveClassifier:
         tweet_id: str,
         target_language_code: str
     ) -> Union[None, str]:
+        """Tries to load translation from database cache.
+
+        Args:
+            tweet_id (str): ID of the tweet.
+            target_language_code (str): Target language 2 letter code.
+
+        Returns:
+            Union[None, str]: Translation.
+        """    
         output = None
         self.connect()
         cur = self.cursor()
@@ -1329,6 +1443,13 @@ class JsonLInteractiveClassifier:
         target_language_code: str,
         traduction: str
     ):
+        """Stores translation in the database.
+
+        Args:
+            tweet (TweetInteractiveClassifier): Tweet Object.
+            target_language_code (str): Target language 2 letter code.
+            traduction (str): Traduction to be stored.
+        """    
         self.connect()
         cur = self.cursor()
         cur.execute(
@@ -1339,6 +1460,12 @@ class JsonLInteractiveClassifier:
         cur.close()
     
     def save_slang(self, slang: str, tweet_id: str):
+        """Stores slang in database pointing to a Tweet ID.
+
+        Args:
+            slang (str): Slang word or phrase.
+            tweet_id (str): Tweet ID of source text.
+        """
         self.connect()
         cur = self.cursor()
         try:
@@ -1357,6 +1484,14 @@ class JsonLInteractiveClassifier:
 
     @staticmethod
     def clean_contents(split_text: List[str]) -> List[str]:
+        """Used to eliminate empty strings from list. Part of the translation process.
+
+        Args:
+            split_text (List[str]): List of text split at the location of mentions & hashtags.
+
+        Returns:
+            List[str]: The same list without empty strings.
+        """        
         contents = []
         for text in split_text:
             if text:
@@ -1367,6 +1502,15 @@ class JsonLInteractiveClassifier:
     def text_to_list(
         tweet: TweetInteractiveClassifier
     ) -> Tuple[List[str], List[dict]]:
+        """Deconstructs a tweet text at the location of mentions and hashtags
+        into a list. Part of the translation process.
+
+        Args:
+            tweet (TweetInteractiveClassifier): Tweet Object
+
+        Returns:
+            Tuple[List[str], List[dict]]: A list of strings and a dictionary of the cut out mentions and hashtags.
+        """    
         text = tweet.text()
         text_split = []
         tail_start = 0
@@ -1383,6 +1527,17 @@ class JsonLInteractiveClassifier:
     def lists_to_text(
         translations: RepeatedField, split_text: List[str], mentions_and_hashtags: List[dict]
     ) -> str:
+        """Reconstructs from the translations list, the split_text and the mentinos_and_hashtags
+        the original message translated into the target language.
+
+        Args:
+            translations (RepeatedField): Iterable of strings containing a translation.
+            split_text (List[str]): The original split of text from removing mentions and hashtags
+            mentions_and_hashtags (List[dict]): Mentions and Hashtags with position information.
+
+        Returns:
+            str: Composed translation including mentinos and hashtags in the text.
+        """    
         output = ""
         content_translations = []
         for trans in translations:
@@ -1414,16 +1569,47 @@ class JsonLInteractiveClassifier:
 
     @staticmethod
     def sorted_mentions_and_hashtags(tweet: TweetInteractiveClassifier) -> List[dict]:
+        """Sort mentions and hashtags by their indexes in the text.
+        Allows reconstruction of the tweet after segmented translation.
+
+        Args:
+            tweet (TweetInteractiveClassifier): Tweet Object
+
+        Returns:
+            List[dict]: Sorted by index list of mentions and hashtags.
+        """        
         m_and_h = tweet.user_mentions() + tweet.hashtags()
         m_and_h.sort(key=lambda x: x["indices"][0])
         return m_and_h
 
 
 def wrapCodeIPython(code: str, size:float=0.95, color:str="white", background:str="#333", lines:int=30):
+    """Wraps text/code into a pre and a code tag to display into screen with styling.
+
+    Args:
+        code (str): content of the block.
+        size (float, optional): Size in em of the text. Defaults to 0.95.
+        color (str, optional): Text color. Defaults to "white".
+        background (str, optional): Background color. Defaults to "#333".
+        lines (int, optional): lines of text to display, unit=em. Defaults to 30.
+    """    
     html = f'<pre><code style="font-size:{size}em; color:{color}; background:{background}; display:block; max-height:{lines}em; overflow-y: scroll; overflow-wrap:break-word; margin:">{code}</code></pre>'
     display(HTML(html))
 
 def prettyPrintDataFrame(df: pd.DataFrame, url_columns=["url"], max_column=50):
+    """Prints pandas dataframes with custom max-width for column and potentially
+    transforms URL into clickable content by using to_html(escape=False) method.
+
+    WARNING!: Can potentially execute external code if not properly used.
+
+    Args:
+        df (pd.DataFrame): Dataframe.
+        url_columns (list, optional): List of column names to be considered as urls. Defaults to ["url"].
+        max_column (int, optional): custom max column size. Defaults to 50.
+
+    Returns:
+        [type]: [description]
+    """    
     pd.set_option('display.max_colwidth', max_column)
     tmp_df = df.copy()
     def url2tag(url:str)->str:
