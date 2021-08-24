@@ -1,4 +1,5 @@
 from os import environ
+import pandas as pd
 from sqlite3.dbapi2 import Cursor
 from typing import Tuple, List, Union
 from datetime import datetime
@@ -88,7 +89,6 @@ class TweetInteractiveClassifier(TweetAnalyzer):
         if not self.oEmbededCached:
             self.load_oEmbed()
         return self.oEmbededCached
-
 
 class JsonLInteractiveClassifier:
     _delay = 5.0
@@ -1417,3 +1417,23 @@ class JsonLInteractiveClassifier:
         m_and_h = tweet.user_mentions() + tweet.hashtags()
         m_and_h.sort(key=lambda x: x["indices"][0])
         return m_and_h
+
+
+def wrapCodeIPython(code: str, size:float=0.95, color:str="white", background:str="#333", lines:int=30):
+    html = f'<pre><code style="font-size:{size}em; color:{color}; background:{background}; display:block; max-height:{lines}em; overflow-y: scroll; overflow-wrap:break-word; margin:">{code}</code></pre>'
+    display(HTML(html))
+
+def prettyPrintDataFrame(df: pd.DataFrame, url_columns=["url"], max_column=50):
+    pd.set_option('display.max_colwidth', max_column)
+    tmp_df = df.copy()
+    def url2tag(url:str)->str:
+        if len(url)<=max_column:
+            sample = url
+        else:
+            bound = 15 - max_column
+            sample = url[:10] + "... " + url[-bound:]
+        return '<a href="{0}">{1}</a>'.format(url, sample)
+        
+    for column_name in url_columns:
+        tmp_df[column_name] = tmp_df[column_name].apply(url2tag)
+    return HTML(tmp_df.to_html(escape=False))
