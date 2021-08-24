@@ -380,8 +380,10 @@ class JsonLInteractiveClassifier:
                     n += 1
                     if n % commit_loop == 0:
                         commits += 1
+                        # The insert or replace will eliminate any duplicates
+                        # Overlaping time in the twarc queries can lead to duplicates.
                         cur.executemany(
-                            f"INSERT INTO tweet VALUES (?, ?);", records)
+                            f"INSERT OR REPLACE INTO tweet VALUES (?, ?);", records)
                         self.db.commit()
                         records = []
                         if commits >= 100:
@@ -413,16 +415,30 @@ class JsonLInteractiveClassifier:
         """
         self.initialize_v2(tweet_ids_file)
 
-        logging.debug("CREATING TABLE tweet_slang ")
+        
 
         self.connect()
         cur = self.cursor()
-    
+
+        logging.debug("DROP TABLE tweet_slang;")
+        cur.execute("DROP TABLE IF EXISTS tweet_slang;")
+        self.commit()
+
+        logging.debug("CREATING TABLE tweet_slang ")
         cur.execute('''CREATE TABLE tweet_slang (
             tweet_id TEXT,
             slang TEXT,
             PRIMARY KEY("tweet_id", "slang"));''')
         self.commit()
+
+        # logging.debug("Created TABLE db_update;")
+
+        # cur.execute('''
+        # CREATE TABLE db_update (
+        #     version REAL,
+        #     git_commit TEXT,
+        #     timestamp REAL,
+        #     PRIMARY KEY("version"));''')
 
         cur.close()
         self.close()
