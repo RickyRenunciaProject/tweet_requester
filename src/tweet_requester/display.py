@@ -1,5 +1,5 @@
 from os import environ
-from sqlite3.dbapi2 import Cursor, version
+from sqlite3.dbapi2 import Cursor
 from typing import Tuple, List, Union
 from datetime import datetime
 from google.cloud.translate_v3.types.translation_service import TranslateTextResponse
@@ -98,6 +98,7 @@ class JsonLInteractiveClassifier:
         self, tweet_ids_file: str, session: TSess,
         pre_initialized=False, sqlite_db: str = "", **kwargs
     ):
+        # Set Translation Configuration
         self.google_credentials: service_account.Credentials = \
             kwargs.get("google_credentials", None)
         self.target_language_code = kwargs.get("target_language_code", "en")
@@ -107,22 +108,35 @@ class JsonLInteractiveClassifier:
             )
         else:
             self.translate_client = None
+        
+        # Set Tweet Session to request data
         self.tweet_session = session
+
+        # Initialize variables for processing loop
         self._last_submit = time()
         self.db = None
         self.current_tweet = None
         self.current_tweet_id = None
         self._next_tweet_id = Queue()
+
+        # Set data source and database location
+        self.original_filename = tweet_ids_file
+        if type(sqlite_db) is str and sqlite_db:
+            self.sqlite_filename = sqlite_db
+        else:
+            self.sqlite_filename = + tweet_ids_file + ".db"
+
         if not pre_initialized:
             self.initialize(tweet_ids_file)
         else:
-            self.original_filename = None
             self.sqlite_filename = sqlite_db
+            # Verify that the database exists and the class can connect.
             assert sqlite_db != '', "Specify a filename to load the database."
             assert isfile(sqlite_db), "The given sqlite filename was \
                 not found. Verify the name or path."
             self.connect()
 
+        # Optionally start evaluating tweets upon creating the object.
         if kwargs.get("start_inmediately", False):
             self.StartEvaluations()
 
@@ -176,7 +190,7 @@ class JsonLInteractiveClassifier:
             data, code = self.tweet_session.load_tweet_11(tweet_id)
             data = json.loads(data)[0]
             assert code == 200, "Could not get response!"
-            favoriteCount: int = data.get("favorite_count", 0)
+            favoriteCount: int = data.get("favorite_count", None)
             cur.execute("""UPDATE tweet_auto_detail
                 SET favoriteCount = ?
                 WHERE tweet_id = ? ;""",
@@ -290,6 +304,7 @@ class JsonLInteractiveClassifier:
             language TEXT,
             retweetCount INTEGER,
             quoteCount INTEGER,
+            favoriteCount INTEGER,
             text TEXT,
             PRIMARY KEY("tweet_id"));''')
         cur.execute("""CREATE INDEX tweet_auto_detail_has_media
@@ -362,8 +377,17 @@ class JsonLInteractiveClassifier:
 
             self.finalize_tweet(tweet_id=tweet.id)
 
-    def initialize(self, tweet_ids_file: str):
-        version = self.initialize_v3(tweet_ids_file)
+    def initialize(self, **kwargs):
+        if isfile(self.sqlite_filename):
+            try:
+                self.connect()
+                return # Used database in its current state
+            except:
+                # Backup Old DB File with timestamp
+                move(self.sqlite_filename, self.sqlite_filename+"."+str(time()))
+                # Fresh database start feed the initial data from original_filename
+
+        version = self.initialize_db_v4()
 
         self.connect()
         cur = self.cursor()
@@ -409,54 +433,12 @@ class JsonLInteractiveClassifier:
         cur.close()
         self.close()
     
-    def initialize_v3(self, tweet_ids_file: str) -> int:
-        """Prepares a new SQLite database v0.3 for usage.
-        This method calls on previous initialization v0.2
-        """
-        self.initialize_v2(tweet_ids_file)
-
-        
-
-        self.connect()
-        cur = self.cursor()
-
-        logging.debug("DROP TABLE tweet_slang;")
-        cur.execute("DROP TABLE IF EXISTS tweet_slang;")
-        self.commit()
-
-        logging.debug("CREATING TABLE tweet_slang ")
-        cur.execute('''CREATE TABLE tweet_slang (
-            tweet_id TEXT,
-            slang TEXT,
-            PRIMARY KEY("tweet_id", "slang"));''')
-        self.commit()
-
-        # logging.debug("Created TABLE db_update;")
-
-        # cur.execute('''
-        # CREATE TABLE db_update (
-        #     version REAL,
-        #     git_commit TEXT,
-        #     timestamp REAL,
-        #     PRIMARY KEY("version"));''')
-
-        cur.close()
-        self.close()
-        return 0.3
-
-
-    def initialize_v2(self, tweet_ids_file: str) -> int:
+    def initialize_db_v4(self, **kwargs) -> float:
         """Prepares a new SQLite database for usage.
+
+        Combines into single method initialize_v2 and initialize_v3.
         """
-        self.original_filename = tweet_ids_file
-        self.sqlite_filename = "." + tweet_ids_file + ".db"
-        if isfile(self.sqlite_filename):
-            try:
-                self.connect()
-                return
-            except:
-                # Backup Old DB File
-                move(self.sqlite_filename, self.sqlite_filename+"."+str(time()))
+        
         # Connect and initialize tables
         self.connect()
 
@@ -528,82 +510,22 @@ class JsonLInteractiveClassifier:
             PRIMARY KEY( "target_language_code", "tweet_id"  ));''')
         self.commit()
 
-        return 0.2
-
-    def initialize_v1(self, tweet_ids_file: str):
-        """Prepares a new SQLite database for usage.
-        """
-        self.original_filename = tweet_ids_file
-        self.sqlite_filename = "." + tweet_ids_file + ".db"
-        if isfile(self.sqlite_filename):
-            try:
-                self.connect()
-                return
-            except:
-                # Backup Old DB File
-                move(self.sqlite_filename, self.sqlite_filename+"."+str(time()))
-        # Connect and initialize tables
-        self.connect()
-
-        cur = self.cursor()
-
-        cur.execute(
-            'CREATE TABLE tweet (tweet_id TEXT, state INTEGER, PRIMARY KEY("tweet_id") );'
-        )
-        cur.execute("""CREATE INDEX tweet_state ON tweet (state);""")
-        # Replaced Unique Index with PRIMARY KEY at creation
-        # cur.execute(
-        #     """CREATE UNIQUE INDEX tweet_id_index ON tweet (tweet_id);""")
-        self.db.commit()
-
-        with open(self.original_filename, "r") as source:
-            n = 0
-            commits = 0
-            commit_loop = 5000
-            records = []
-            for k in source:
-                k = str(k).strip()
-                if k != "":
-                    records.append((k, 0))
-                    n += 1
-                    if n % commit_loop == 0:
-                        commits += 1
-                        cur.executemany(
-                            f"INSERT INTO tweet VALUES (?, ?);", records)
-                        self.db.commit()
-                        records = []
-                        if commits >= 100:
-                            break
-
-                else:
-                    break
-            if len(records) > 0:
-                cur.execute(f"INSERT INTO tweet VALUES (?, ?);", records)
-                self.commit()
-                records = []
-
-        cur.execute('''CREATE TABLE tweet_detail (
-            tweet_id TEXT,
-            has_media INTEGER,
-            description TEXT,
-            is_meme INTEGER,
-            language TEXT,
-            has_slang INTEGER,
-            PRIMARY KEY("tweet_id"));''')
-        cur.execute("""CREATE INDEX tweet_detail_has_media
-            ON tweet_detail(has_media);
-        """)
+        logging.debug("DROP TABLE tweet_slang;")
+        cur.execute("DROP TABLE IF EXISTS tweet_slang;")
         self.commit()
 
-        # Traduction Cache in DB
-        cur.execute('''CREATE TABLE tweet_traduction (
+        logging.debug("CREATING TABLE tweet_slang ")
+        cur.execute('''CREATE TABLE tweet_slang (
             tweet_id TEXT,
-            target_language_code TEXT,
-            traduction TEXT,
-            PRIMARY KEY( "target_language_code", "tweet_id"  ));''')
+            slang TEXT,
+            PRIMARY KEY("tweet_id", "slang"));''')
         self.commit()
 
-        cur.close()
+        self.close()
+
+        
+
+        return 0.4
 
     def connect(self):
         self.close()
@@ -1000,9 +922,10 @@ class JsonLInteractiveClassifier:
                 "language",
                 "retweetCount",
                 "quoteCount",
+                "favoriteCount",
                 "text"
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);""",
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);""",
             (
                 tweet.id,
                 tweet.isBasedOn(),
@@ -1015,6 +938,7 @@ class JsonLInteractiveClassifier:
                 tweet.language(),
                 tweet.retweetCount,
                 tweet.quoteCount,
+                tweet.favoriteCount,
                 tweet.text()
             )
         )
