@@ -28,7 +28,7 @@ class TweetMedia:
 class TweetPhoto(TweetMedia):
     def __init__(self, data: dict, source_tweet=None):
         super().__init__(data, source_tweet=source_tweet)
-        assert self.mtype().lower() == "photo", "Not a photo media"
+        assert self.mtype().lower() == "photo", "Not a photo media."
 
     def thumbnailURL(self):
         if "thumb" in self.data["sizes"].keys():
@@ -58,7 +58,32 @@ class TweetPhoto(TweetMedia):
 class TweetVideo(TweetMedia):
     def __init__(self, data: dict, source_tweet=None):
         super().__init__(data, source_tweet=source_tweet)
-        assert self.mtype().lower() == "video", "Not a video media"
+        assert self.mtype().lower() == "video", "Not a video media."
+    
+    def getBitrates(self)->List[int]:
+        bitrates = []
+        for variant in self.getVariants():
+            bitrates.append(variant["bitrate"])
+        return bitrates
+    
+    def thumbnailUrl(self, size:str="thumb") -> Union[str, None]:       
+        """Videos and Gif use media_url_https to store thumbnail URL.
+
+        Args:
+            size (str, optional): String of desired size. Defaults to "thumb".
+
+        Returns:
+            Union[str, None]: URL to video/gif thumbnail.
+        """
+        try:
+            assert size in ["thumb", "small", "medium", "large"], "Not a valid size"
+        except:
+            size = "thumb"
+        
+        url: Union[str, None]= self.data.get("media_url_https", None)
+        if url:
+            url = url + ":" + size
+        return url
 
     def getVariants(self):
         try:
@@ -66,12 +91,36 @@ class TweetVideo(TweetMedia):
         except:
             return []
 
+    def additional_media_info(self) -> Union[dict, None]:
+        return self.data.get("additional_media_info", None)
+    
+    def video_info(self) -> Union[dict, None]:
+        return self.data.get("video_info", None)
+    
+    def embeddable(self) -> bool:
+        embeddable = False
+        if self.additional_media_info():
+            # In theory if additional_media_info is present then it is never embeddable.
+            embeddable: bool = self.additional_media_info().get("embeddable", False)
+        elif self.video_info():
+            embeddable = True
+        return embeddable
+
     def url(self, bitrate=832000):
-        return self.getBestVariant(bitrate)['url']
+        if self.embeddable():
+            # Return the video that closest match to the desired bitrate
+            return self.getBestVariant(bitrate)['url']
+        else:
+            # If not embeddable then video can only be seen through Twitter.
+            return self.data.get(
+                "expanded_url",
+                self.data.get("url")
+            )
 
     def getBestVariant(self, bitrate=832000):
+        from sys import maxsize as upperbound
         closest = None
-        distance = bitrate
+        distance = upperbound
         for v in self.getVariants():
             if "bitrate" in v.keys():
                 if int(v["bitrate"]) == bitrate:
@@ -87,6 +136,13 @@ class TweetVideo(TweetMedia):
         # Return first in list
         return self.getVariants()[0]
 
+
+# TODO: Create custom methods for Animated Gif and use in other classes
+# READ: https://developer.twitter.com/en/docs/twitter-api/v1/data-dictionary/object-model/extended-entities
+class TweetGif(TweetVideo):
+    def __init__(self, data: dict, source_tweet=None):
+        super().__init__(data, source_tweet=source_tweet)
+        assert self.mtype().lower() == "animated_gif", "Not an animated gif media."
 
 class TweetAnalyzer:
     def __init__(self, data: Union[str, dict], localMedia: bool = True):
@@ -233,26 +289,31 @@ class TweetAnalyzer:
                 dive into the quoted and retweeted tweet statuses. Defaults to True.
         """
         media = []
-        # if 'entities' in self.data.keys():
-        if 'media' in self.entities().keys():
-            for m in self.data['entities']['media']:
-                if m["type"].lower() == "photo":
-                    media.append(TweetPhoto(m, self.id))
-                elif m["type"].lower() == "video":
-                    media.append(TweetVideo(m, self.id))
-                else:
-                    media.append(TweetMedia(m, self.id))
+        # Priority to extended_entities that has the correct media type
+        # READ: https://developer.twitter.com/en/docs/twitter-api/v1/data-dictionary/object-model/extended-entities
         if 'media' in self.extended_entities().keys():
             for m in self.data['extended_entities']['media']:
                 if m["type"].lower() == "photo":
                     media.append(TweetPhoto(m, self.id))
                 elif m["type"].lower() == "video":
                     media.append(TweetVideo(m, self.id))
+                elif m["type"].lower() == "animated_gif":
+                    media.append(TweetGif(m, self.id))
+                else:
+                    media.append(TweetMedia(m, self.id))
+        if 'media' in self.entities().keys():
+            for m in self.data['entities']['media']:
+                if m["type"].lower() == "photo":
+                    media.append(TweetPhoto(m, self.id))
+                elif m["type"].lower() == "video":
+                    media.append(TweetVideo(m, self.id))
+                elif m["type"].lower() == "animated_gif":
+                    media.append(TweetGif(m, self.id))
                 else:
                     media.append(TweetMedia(m, self.id))
 
         # Keep a shallow copy of the media list as the local media
-        self.localMedia: List[Union[TweetMedia, TweetVideo, TweetPhoto]] = media.copy()
+        self.localMedia: List[Union[TweetMedia, TweetVideo, TweetPhoto, TweetGif]] = media.copy()
         
         # If recursive process the internal media of retweeted or quoted status
         if recursive:
@@ -262,7 +323,7 @@ class TweetAnalyzer:
             if getattr(self, "quoted_status", False):
                 if self.quoted_status.hasMedia:
                     media = media + self.quoted_status.media
-            self.media: List[Union[TweetMedia, TweetVideo, TweetPhoto]] = media
+            self.media: List[Union[TweetMedia, TweetVideo, TweetPhoto, TweetGif]] = media
         else:
             self.media = self.localMedia
 
