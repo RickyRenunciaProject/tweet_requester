@@ -292,7 +292,7 @@ class TweetAnalyzer:
         # Priority to extended_entities that has the correct media type
         # READ: https://developer.twitter.com/en/docs/twitter-api/v1/data-dictionary/object-model/extended-entities
         if 'media' in self.extended_entities().keys():
-            for m in self.data['extended_entities']['media']:
+            for m in self.extended_entities().get('media', []):
                 if m["type"].lower() == "photo":
                     media.append(TweetPhoto(m, self.id))
                 elif m["type"].lower() == "video":
@@ -301,8 +301,9 @@ class TweetAnalyzer:
                     media.append(TweetGif(m, self.id))
                 else:
                     media.append(TweetMedia(m, self.id))
-        if 'media' in self.entities().keys():
-            for m in self.data['entities']['media']:
+        elif 'media' in self.entities().keys():
+            # If media found in extended_entities then this values will be repeated.
+            for m in self.entities().get('media', []):
                 if m["type"].lower() == "photo":
                     media.append(TweetPhoto(m, self.id))
                 elif m["type"].lower() == "video":
