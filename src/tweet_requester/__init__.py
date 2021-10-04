@@ -7,4 +7,4 @@ from .analysis import \
 from .session import TSess
 from .cache import Cache
 
-__version__="0.0.1.4"
+__version__="0.0.1.7"
